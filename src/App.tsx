@@ -562,7 +562,7 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#080b11] text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-emerald-500/20 transition-colors">
+    <div className="min-h-screen bg-background text-[var(--text-primary)] flex flex-col font-sans selection:bg-emerald-500/20 transition-colors">
       {/* Top Main Navigation Bar */}
       <Navbar
         currentPath={currentPath}

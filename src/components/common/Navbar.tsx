@@ -88,7 +88,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 dark:bg-[#0c1017]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 shadow-sm transition-colors">
+    <header className="sticky top-0 z-40 bg-surface/95 backdrop-blur-md border-b border-[var(--border-subtle)] shadow-sm transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Left: Brand Logo & Mobile Menu Toggle */}
@@ -122,14 +122,14 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Desktop Navigation Links */}
-          <nav className="hidden lg:flex items-center gap-1 bg-slate-100/90 dark:bg-[#131a28] p-1.5 rounded-2xl border border-slate-200/90 dark:border-slate-800/80">
+          <nav aria-label="Primary navigation" className="hidden lg:flex items-center gap-1 bg-[var(--bg-surface-elevated)] p-1 rounded-xl border border-[var(--border-subtle)]">
             {navItems.map((item) => {
               const active = isNavActive(item.tab, item.path);
               return (
                 <button
                   key={item.tab}
                   onClick={() => onNavigate(item.path, item.tab)}
-                  className={`px-3.5 py-1.5 rounded-xl font-bold text-xs tracking-tight transition-all duration-150 cursor-pointer ${
+                  className={`px-3.5 py-2 rounded-lg font-bold text-xs tracking-tight transition-all duration-150 cursor-pointer ${
                     active
                       ? 'bg-white dark:bg-emerald-600 text-emerald-600 dark:text-white shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-800/60'

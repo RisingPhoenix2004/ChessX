@@ -3,82 +3,74 @@
 @tailwind utilities;
 
 :root {
-  --bg-app: #f8fafc;
-  --bg-surface: #ffffff;
-  --bg-surface-elevated: #f1f5f9;
-  --bg-card: #ffffff;
-  --bg-card-hover: #f8fafc;
-  --border-subtle: #f1f5f9;
-  --border-default: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --text-primary: #0f172a;
-  --text-secondary: #334155;
-  --text-muted: #64748b;
-  --accent-brand: #10b981;
-  --accent-brand-hover: #059669;
-  --accent-success: #10b981;
-  --accent-error: #ef4444;
-  --accent-warning: #f59e0b;
-  --accent-fire: #f59e0b;
-  --chessboard-bg: #e2e8f0;
-  --shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+  --bg-app: #f4f1e8;
+  --bg-surface: #fffdf8;
+  --bg-surface-elevated: #ebe6da;
+  --bg-card: #fffdf8;
+  --bg-card-hover: #f8f4eb;
+  --border-subtle: #e9e3d7;
+  --border-default: #d8d0c1;
+  --border-strong: #b9ad9b;
+  --text-primary: #18221d;
+  --text-secondary: #435048;
+  --text-muted: #7c877e;
+  --accent-brand: #236b52;
+  --accent-brand-hover: #1b5742;
+  --accent-success: #3e8a62;
+  --accent-error: #b85c4a;
+  --accent-warning: #c38b38;
+  --accent-fire: #c87935;
+  --chessboard-bg: #ded7c9;
+  --shadow-card: 0 12px 32px -20px rgba(40, 48, 40, 0.28);
 }
 
 html.dark, :root.dark {
-  --bg-app: #080b11;
-  --bg-surface: #0f1523;
-  --bg-surface-elevated: #161e31;
-  --bg-card: #0f1523;
-  --bg-card-hover: #161e31;
-  --border-subtle: #162032;
-  --border-default: #1f2c44;
-  --border-strong: #2d3f60;
-  --text-primary: #f8fafc;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
-  --accent-brand: #10b981;
-  --accent-brand-hover: #34d399;
-  --accent-success: #10b981;
-  --accent-error: #ef4444;
-  --accent-warning: #f59e0b;
-  --accent-fire: #f59e0b;
-  --chessboard-bg: #121824;
-  --shadow-card: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 4px 12px -2px rgba(0, 0, 0, 0.3);
+  --bg-app: #101815;
+  --bg-surface: #17211c;
+  --bg-surface-elevated: #202d26;
+  --bg-card: #17211c;
+  --bg-card-hover: #223128;
+  --border-subtle: #24332b;
+  --border-default: #33483b;
+  --border-strong: #4a6351;
+  --text-primary: #f2efe6;
+  --text-secondary: #c3cfc3;
+  --text-muted: #8e9e91;
+  --accent-brand: #72b68f;
+  --accent-brand-hover: #91c8a5;
+  --accent-success: #72b68f;
+  --accent-error: #d48470;
+  --accent-warning: #d2a45b;
+  --accent-fire: #d39154;
+  --chessboard-bg: #25332b;
+  --shadow-card: 0 18px 42px -24px rgba(0, 0, 0, 0.7);
 }
 
 @layer base {
+  html { background: var(--bg-app); }
   body {
     background-color: var(--bg-app);
     color: var(--text-primary);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    letter-spacing: -0.01em;
     transition: background-color 0.2s ease, color 0.2s ease;
   }
+  ::selection { background: color-mix(in srgb, var(--accent-brand) 24%, transparent); }
+  :focus-visible { outline: 2px solid var(--accent-brand); outline-offset: 3px; }
+  button, a { -webkit-tap-highlight-color: transparent; }
 }
 
-/* Custom Scrollbars */
-::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+@layer components {
+  .tactix-surface { background: var(--bg-surface); border: 1px solid var(--border-default); box-shadow: var(--shadow-card); }
+  .tactix-kicker { color: var(--accent-brand); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; }
+  .tactix-rule { border-color: var(--border-subtle); }
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-brand); }
 
-html.dark ::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 9999px;
-}
-
-html.dark ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
-}
-
-html.light ::-webkit-scrollbar-thumb, :root:not(.dark) ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 9999px;
-}
-
-html.light ::-webkit-scrollbar-thumb:hover, :root:not(.dark) ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
 }

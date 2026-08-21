@@ -104,9 +104,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const firstName = userProfile.name?.split(' ')[0] || userProfile.username || 'Player';
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8 space-y-8 font-sans">
+    <div className="max-w-6xl mx-auto px-4 py-8 sm:py-10 space-y-8 font-sans">
       {/* Top Welcome Banner */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
         <div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 dark:bg-[#1d1610] border border-amber-200 dark:border-amber-900/50 text-amber-700 dark:text-amber-400 text-xs font-bold mb-2">
             <Flame className="w-4 h-4 fill-amber-500 text-amber-500" />

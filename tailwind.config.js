@@ -8,28 +8,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#0a0d14',
-        card: '#121824',
-        'card-hover': '#182030',
-        border: '#1f293d',
+        background: 'var(--bg-app)',
+        surface: 'var(--bg-surface)',
+        card: 'var(--bg-card)',
+        'card-hover': 'var(--bg-card-hover)',
+        border: 'var(--border-default)',
         primary: {
-          50: '#ecfdf5',
-          100: '#d1fae5',
-          400: '#34d399',
-          500: '#10b981',
-          600: '#059669',
-          700: '#047857',
+          50: '#edf4ee', 100: '#d9e9dc', 400: '#72b68f', 500: '#236b52', 600: '#1b5742', 700: '#154536',
         },
-        gold: {
-          400: '#fbbf24',
-          500: '#f59e0b',
-          600: '#d97706',
-        },
-        accent: {
-          purple: '#a855f7',
-          cyan: '#06b6d4',
-          rose: '#f43f5e',
-        }
+        gold: { 400: '#d2a45b', 500: '#c38b38', 600: '#9f6f2a' },
+        accent: { purple: '#8573a1', cyan: '#5d9ca0', rose: '#b85c4a' }
       },
       fontFamily: {
         sans: ['Inter', 'Outfit', 'sans-serif'],
