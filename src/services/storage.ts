@@ -81,6 +81,13 @@ const DEFAULT_USER_STATS: UserStats = {
   },
 };
 
+function getScopedKey(baseKey: string, userId?: string): string {
+  if (userId && userId !== 'guest' && userId !== 'guest_101') {
+    return `${baseKey}_${userId}`;
+  }
+  return baseKey;
+}
+
 export const storage = {
   // --- User Profile ---
   getUserProfile(): UserProfile {
@@ -89,7 +96,11 @@ export const storage = {
       this.saveUserProfile(DEFAULT_PROFILE);
       return DEFAULT_PROFILE;
     }
-    return JSON.parse(raw);
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return DEFAULT_PROFILE;
+    }
   },
 
   saveUserProfile(profile: UserProfile): void {
@@ -97,92 +108,140 @@ export const storage = {
   },
 
   // --- User Stats ---
-  getUserStats(): UserStats {
-    const raw = localStorage.getItem(KEYS.USER_STATS);
+  getUserStats(userId?: string): UserStats {
+    const key = getScopedKey(KEYS.USER_STATS, userId);
+    const raw = localStorage.getItem(key);
     if (!raw) {
-      this.saveUserStats(DEFAULT_USER_STATS);
-      return DEFAULT_USER_STATS;
+      return { ...DEFAULT_USER_STATS };
     }
-    const stats: UserStats = JSON.parse(raw);
-    if (!stats.dailyGoal) stats.dailyGoal = 10;
-    stats.level = Math.max(1, stats.completedCollectionsCount || 0);
-    return stats;
+    try {
+      const stats: UserStats = JSON.parse(raw);
+      if (!stats.dailyGoal) stats.dailyGoal = 10;
+      stats.level = Math.max(1, stats.completedCollectionsCount || 0);
+      return stats;
+    } catch {
+      return { ...DEFAULT_USER_STATS };
+    }
   },
 
-  saveUserStats(stats: UserStats): void {
-    stats.level = Math.max(1, stats.completedCollectionsCount || 0);
-    localStorage.setItem(KEYS.USER_STATS, JSON.stringify(stats));
+  saveUserStats(stats: UserStats, userId?: string): void {
+    const key = getScopedKey(KEYS.USER_STATS, userId);
+    const copy = { ...stats };
+    copy.level = Math.max(1, copy.completedCollectionsCount || 0);
+    localStorage.setItem(key, JSON.stringify(copy));
   },
 
   // --- Collections (Start empty - user uploads custom PGNs) ---
-  getCollections(): Collection[] {
-    const raw = localStorage.getItem(KEYS.COLLECTIONS);
+  getCollections(userId?: string): Collection[] {
+    const key = getScopedKey(KEYS.COLLECTIONS, userId);
+    const raw = localStorage.getItem(key);
     if (!raw) {
       return [];
     }
-    return JSON.parse(raw);
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
   },
 
-  saveCollections(collections: Collection[]): void {
-    localStorage.setItem(KEYS.COLLECTIONS, JSON.stringify(collections));
+  saveCollections(collections: Collection[], userId?: string): void {
+    const key = getScopedKey(KEYS.COLLECTIONS, userId);
+    localStorage.setItem(key, JSON.stringify(collections));
   },
 
   // --- Puzzles ---
-  getPuzzles(): Puzzle[] {
-    const raw = localStorage.getItem(KEYS.PUZZLES);
+  getPuzzles(userId?: string): Puzzle[] {
+    const key = getScopedKey(KEYS.PUZZLES, userId);
+    const raw = localStorage.getItem(key);
     if (!raw) {
       return [];
     }
-    return JSON.parse(raw);
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
   },
 
-  savePuzzles(puzzles: Puzzle[]): void {
-    localStorage.setItem(KEYS.PUZZLES, JSON.stringify(puzzles));
+  savePuzzles(puzzles: Puzzle[], userId?: string): void {
+    const key = getScopedKey(KEYS.PUZZLES, userId);
+    localStorage.setItem(key, JSON.stringify(puzzles));
   },
 
   // --- Video Library ---
-  getVideos(): VideoLibraryItem[] {
-    const raw = localStorage.getItem(KEYS.VIDEOS);
-    return raw ? JSON.parse(raw) : [];
+  getVideos(userId?: string): VideoLibraryItem[] {
+    const key = getScopedKey(KEYS.VIDEOS, userId);
+    const raw = localStorage.getItem(key);
+    try {
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
   },
 
-  saveVideos(videos: VideoLibraryItem[]): void {
-    localStorage.setItem(KEYS.VIDEOS, JSON.stringify(videos));
+  saveVideos(videos: VideoLibraryItem[], userId?: string): void {
+    const key = getScopedKey(KEYS.VIDEOS, userId);
+    localStorage.setItem(key, JSON.stringify(videos));
   },
 
   // --- Sessions ---
-  getSessions(): SessionStats[] {
-    const raw = localStorage.getItem(KEYS.SESSIONS);
-    return raw ? JSON.parse(raw) : [];
+  getSessions(userId?: string): SessionStats[] {
+    const key = getScopedKey(KEYS.SESSIONS, userId);
+    const raw = localStorage.getItem(key);
+    try {
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
   },
 
-  saveSession(session: SessionStats): void {
-    const sessions = this.getSessions();
+  saveSession(session: SessionStats, userId?: string): void {
+    const key = getScopedKey(KEYS.SESSIONS, userId);
+    const sessions = this.getSessions(userId);
     sessions.unshift(session);
-    localStorage.setItem(KEYS.SESSIONS, JSON.stringify(sessions));
+    localStorage.setItem(key, JSON.stringify(sessions));
   },
 
   // --- Achievements ---
-  getAchievements(): Achievement[] {
-    const raw = localStorage.getItem(KEYS.ACHIEVEMENTS);
+  getAchievements(userId?: string): Achievement[] {
+    const key = getScopedKey(KEYS.ACHIEVEMENTS, userId);
+    const raw = localStorage.getItem(key);
     if (!raw) {
-      localStorage.setItem(KEYS.ACHIEVEMENTS, JSON.stringify(INITIAL_ACHIEVEMENTS));
+      localStorage.setItem(key, JSON.stringify(INITIAL_ACHIEVEMENTS));
       return INITIAL_ACHIEVEMENTS;
     }
-    return JSON.parse(raw);
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return INITIAL_ACHIEVEMENTS;
+    }
   },
 
-  saveAchievements(achievements: Achievement[]): void {
-    localStorage.setItem(KEYS.ACHIEVEMENTS, JSON.stringify(achievements));
+  saveAchievements(achievements: Achievement[], userId?: string): void {
+    const key = getScopedKey(KEYS.ACHIEVEMENTS, userId);
+    localStorage.setItem(key, JSON.stringify(achievements));
   },
 
   // --- Settings ---
   getSettings(): Settings {
     const raw = localStorage.getItem(KEYS.SETTINGS);
-    return raw ? JSON.parse(raw) : DEFAULT_SETTINGS;
+    try {
+      return raw ? JSON.parse(raw) : DEFAULT_SETTINGS;
+    } catch {
+      return DEFAULT_SETTINGS;
+    }
   },
 
   saveSettings(settings: Settings): void {
     localStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings));
+  },
+
+  // --- Reset all cache to guest ---
+  clearGuestCache(): void {
+    localStorage.removeItem(KEYS.USER_STATS);
+    localStorage.removeItem(KEYS.COLLECTIONS);
+    localStorage.removeItem(KEYS.PUZZLES);
+    localStorage.removeItem(KEYS.SESSIONS);
   },
 };

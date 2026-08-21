@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ActiveTab, Collection, Puzzle, UserStats, Achievement, UserProfile, ThemeMode } from './types/chess';
 import { storage, Settings } from './services/storage';
 import { getLibrary, saveLibrary } from './services/libraryApi';
@@ -20,7 +20,7 @@ import { StatsView } from './components/stats/StatsView';
 import { ProfileView } from './components/profile/ProfileView';
 import { SettingsView } from './components/settings/SettingsView';
 import { CommunityView } from './components/community/CommunityView';
-import { Target, CheckCircle2, X } from 'lucide-react';
+import { Target, X } from 'lucide-react';
 
 export function App() {
   const [currentPath, setCurrentPath] = useState<string>(() => window.location.pathname);
@@ -40,6 +40,7 @@ export function App() {
       path === '/stats' ||
       path === '/community' ||
       path === '/profile' ||
+      path.startsWith('/profile/') ||
       path === '/settings'
     ) {
       return true;
@@ -52,18 +53,18 @@ export function App() {
     if (path === '/studies' || path === '/library') return 'studies';
     if (path === '/videolibrary') return 'videolibrary';
     if (path === '/stats') return 'stats';
-    if (path === '/community') return 'community';
-    if (path === '/profile') return 'profile';
+    if (path === '/community' || path.startsWith('/community/')) return 'community';
+    if (path === '/profile' || path.startsWith('/profile/')) return 'profile';
     if (path === '/settings') return 'settings';
     return 'dashboard';
   });
 
   const [selectedStudyId, setSelectedStudyId] = useState<string | null>(null);
   const [viewingPgnCollection, setViewingPgnCollection] = useState<Collection | null>(null);
-  const [userStats, setUserStats] = useState<UserStats>(() => storage.getUserStats());
-  const [collections, setCollections] = useState<Collection[]>(() => storage.getCollections());
-  const [puzzles, setPuzzles] = useState<Puzzle[]>(() => storage.getPuzzles());
-  const [achievements, setAchievements] = useState<Achievement[]>(() => storage.getAchievements());
+  const [userStats, setUserStats] = useState<UserStats>(() => storage.getUserStats(storage.getUserProfile()?.id));
+  const [collections, setCollections] = useState<Collection[]>(() => storage.getCollections(storage.getUserProfile()?.id));
+  const [puzzles, setPuzzles] = useState<Puzzle[]>(() => storage.getPuzzles(storage.getUserProfile()?.id));
+  const [achievements, setAchievements] = useState<Achievement[]>(() => storage.getAchievements(storage.getUserProfile()?.id));
 
   // Goal Completion Celebration Overlay State
   const [showGoalCelebration, setShowGoalCelebration] = useState<boolean>(false);
@@ -77,6 +78,15 @@ export function App() {
   const [sessionPuzzleCount, setSessionPuzzleCount] = useState<number>(0);
   const [authReady, setAuthReady] = useState<boolean>(false);
   const [libraryHydrated, setLibraryHydrated] = useState<boolean>(false);
+
+  // Extract viewing username from URL when on /profile/:username
+  const viewingUsername = useMemo(() => {
+    if (currentPath.startsWith('/profile/')) {
+      const parts = currentPath.replace('/profile/', '').split('/');
+      return parts[0] ? decodeURIComponent(parts[0]) : null;
+    }
+    return null;
+  }, [currentPath]);
 
   // Synchronize HTML Theme Class
   useEffect(() => {
@@ -122,7 +132,7 @@ export function App() {
       } else if (path === '/community' || path.startsWith('/community/')) {
         setActiveTab('community');
         setIsAppStarted(true);
-      } else if (path === '/profile') {
+      } else if (path === '/profile' || path.startsWith('/profile/')) {
         setActiveTab('profile');
         setIsAppStarted(true);
       } else if (path === '/settings') {
@@ -163,8 +173,8 @@ export function App() {
       if (targetPath === '/studies') targetTab = 'studies';
       else if (targetPath === '/videolibrary') targetTab = 'videolibrary';
       else if (targetPath === '/stats') targetTab = 'stats';
-      else if (targetPath === '/community') targetTab = 'community';
-      else if (targetPath === '/profile') targetTab = 'profile';
+      else if (targetPath === '/community' || targetPath.startsWith('/community/')) targetTab = 'community';
+      else if (targetPath === '/profile' || targetPath.startsWith('/profile/')) targetTab = 'profile';
       else if (targetPath === '/settings') targetTab = 'settings';
       else if (targetPath === '/dashboard' || targetPath === '/') targetTab = 'dashboard';
     }
@@ -206,26 +216,26 @@ export function App() {
     }
   };
 
-  // Storage persistence
+  // User-scoped Storage persistence
   useEffect(() => {
     storage.saveUserProfile(userProfile);
   }, [userProfile]);
 
   useEffect(() => {
-    storage.saveUserStats(userStats);
-  }, [userStats]);
+    storage.saveUserStats(userStats, userProfile.id);
+  }, [userStats, userProfile.id]);
 
   useEffect(() => {
-    storage.saveCollections(collections);
-  }, [collections]);
+    storage.saveCollections(collections, userProfile.id);
+  }, [collections, userProfile.id]);
 
   useEffect(() => {
-    storage.savePuzzles(puzzles);
-  }, [puzzles]);
+    storage.savePuzzles(puzzles, userProfile.id);
+  }, [puzzles, userProfile.id]);
 
   useEffect(() => {
-    storage.saveAchievements(achievements);
-  }, [achievements]);
+    storage.saveAchievements(achievements, userProfile.id);
+  }, [achievements, userProfile.id]);
 
   useEffect(() => {
     storage.saveSettings(settings);
@@ -238,6 +248,11 @@ export function App() {
       if (currentUser) {
         setUserProfile(currentUser);
         setIsAppStarted(true);
+
+        // Load user-scoped cached data first
+        setCollections(storage.getCollections(currentUser.id));
+        setPuzzles(storage.getPuzzles(currentUser.id));
+        setUserStats(storage.getUserStats(currentUser.id));
 
         // Hydrate backend preferences (including theme)
         try {
@@ -280,10 +295,22 @@ export function App() {
         if (!isMounted) return;
 
         if (serverLibrary.collections.length > 0 || serverLibrary.puzzles.length > 0) {
-          setCollections(serverLibrary.collections);
+          const localCols = storage.getCollections(userProfile.id);
+          const mergedCols = serverLibrary.collections.map((sCol) => {
+            const localMatch = localCols.find((l) => l.id === sCol.id);
+            return {
+              ...sCol,
+              coverImage: sCol.coverImage || localMatch?.coverImage || undefined,
+            };
+          });
+          setCollections(mergedCols);
           setPuzzles(serverLibrary.puzzles);
         } else {
-          await saveLibrary({ collections, puzzles });
+          // If server library is empty for this user, check local storage before clearing
+          const localCols = storage.getCollections(userProfile.id);
+          const localPuzzles = storage.getPuzzles(userProfile.id);
+          setCollections(localCols);
+          setPuzzles(localPuzzles);
         }
       } catch (error) {
         console.warn('Library API unavailable, using local cache.', error);
@@ -348,12 +375,18 @@ export function App() {
   const handleAuthSuccess = (profile: UserProfile) => {
     setUserProfile(profile);
     setIsAppStarted(true);
+    // Load scoped state for the newly authenticated user
+    setCollections(storage.getCollections(profile.id));
+    setPuzzles(storage.getPuzzles(profile.id));
+    setUserStats(storage.getUserStats(profile.id));
+    setLibraryHydrated(false);
     returnToPreviousRoute();
   };
 
   const handleLogout = async () => {
     await logoutAccount();
     clearAuthToken();
+    storage.clearGuestCache();
     setUserProfile({
       id: 'guest',
       username: 'guest',
@@ -362,6 +395,9 @@ export function App() {
       avatar: '',
       isLoggedIn: false,
     });
+    setCollections([]);
+    setPuzzles([]);
+    setUserStats(storage.getUserStats('guest'));
     setIsAppStarted(false);
     setCurrentPath('/');
     window.history.pushState({ activeTab: 'dashboard', isAppStarted: false }, '', '/');
@@ -372,7 +408,7 @@ export function App() {
     const failedList =
       reviewPuzzles && reviewPuzzles.length > 0
         ? reviewPuzzles
-        : puzzles.filter((p) => Boolean(p.hasFailed || (p.failedCount || 0) > 0));
+        : puzzles.filter((p) => Boolean(p.hasFailed));
 
     const finalQueue = failedList.length > 0 ? failedList : puzzles;
     setActiveQueue(finalQueue);
@@ -551,6 +587,8 @@ export function App() {
   if (!isAppStarted && !userProfile.isLoggedIn) {
     return (
       <LandingPage
+        currentTheme={theme}
+        onToggleTheme={handleToggleTheme}
         onStartTraining={() => {
           setIsAppStarted(true);
           navigateTo('/studies', 'studies');
@@ -562,7 +600,7 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[#080b11] text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-emerald-500/20 transition-colors">
+    <div className="min-h-screen bg-gray-50 dark:bg-[#0b0e14] text-gray-900 dark:text-slate-100 flex flex-col font-sans selection:bg-emerald-500/20">
       {/* Top Main Navigation Bar */}
       <Navbar
         currentPath={currentPath}
@@ -657,6 +695,7 @@ export function App() {
             puzzles={puzzles}
             collections={collections}
             userStats={userStats}
+            onStartReplaySession={handleStartReviewSession}
           />
         )}
 
@@ -664,6 +703,7 @@ export function App() {
           <CommunityView
             currentUser={userProfile}
             currentUserStats={userStats}
+            onNavigate={navigateTo}
           />
         )}
 
@@ -672,7 +712,9 @@ export function App() {
             userProfile={userProfile}
             userStats={userStats}
             achievements={achievements}
+            viewingUsername={viewingUsername}
             onUpdateProfile={setUserProfile}
+            onNavigate={navigateTo}
           />
         )}
 

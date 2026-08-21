@@ -73,7 +73,8 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 function makeToken() {
   return crypto.randomBytes(32).toString('hex');
@@ -474,6 +475,7 @@ app.put('/api/library', async (req, res) => {
             description: col.description,
             icon: col.icon || '📂',
             color: col.color || 'from-[#171717] to-[#262626]',
+            coverImage: col.coverImage || null,
             isCompleted: Boolean(col.isCompleted),
             createdAt: col.createdAt ? new Date(col.createdAt) : new Date(),
             updatedAt: new Date(),
@@ -484,6 +486,7 @@ app.put('/api/library', async (req, res) => {
             description: col.description,
             icon: col.icon || '📂',
             color: col.color || 'from-[#171717] to-[#262626]',
+            coverImage: col.coverImage || null,
             isCompleted: Boolean(col.isCompleted),
             updatedAt: new Date(),
           },
@@ -492,12 +495,9 @@ app.put('/api/library', async (req, res) => {
 
       for (const puzzle of puzzles) {
         const existing = await tx.puzzle.findUnique({ where: { id: puzzle.id } });
-        const hasFailed = Boolean(
-          existing?.hasFailed ||
-          puzzle.hasFailed ||
-          (existing?.failedCount || 0) > 0 ||
-          (puzzle.failedCount || 0) > 0
-        );
+        const hasFailed = puzzle.hasFailed !== undefined
+          ? Boolean(puzzle.hasFailed)
+          : Boolean(existing?.hasFailed || false);
         const attempts = Math.max(existing?.attempts || 0, puzzle.attempts || 0);
         const solvedCount = Math.max(existing?.solvedCount || 0, puzzle.solvedCount || 0);
         const failedCount = Math.max(existing?.failedCount || 0, puzzle.failedCount || 0);
@@ -891,10 +891,17 @@ app.get('/api/user/preferences', async (req, res) => {
   } catch (err) {
     return res.status(500).json({
       message: 'Failed to get preferences',
-      error: err instanceof Error ? error.message : 'Unknown error',
+      error: err instanceof Error ? err.message : 'Unknown error',
     });
   }
 });
+
+const ALLOWED_PREF_FIELDS = [
+  'theme', 'boardTheme', 'pieceSet', 'showCoordinates', 'coordinateStyle',
+  'highlightLastMove', 'showLegalMoves', 'soundEnabled', 'moveSound',
+  'captureSound', 'checkSound', 'errorSound', 'autoNext', 'autoNextDelaySec',
+  'streakFreezeActive'
+];
 
 app.put('/api/user/preferences', async (req, res) => {
   try {
@@ -907,7 +914,13 @@ app.put('/api/user/preferences', async (req, res) => {
     }
 
     if (usingDatabase) {
-      const { id, userId, updatedAt, ...cleanPrefs } = preferences;
+      const cleanPrefs = {};
+      for (const key of ALLOWED_PREF_FIELDS) {
+        if (preferences[key] !== undefined) {
+          cleanPrefs[key] = preferences[key];
+        }
+      }
+
       const updated = await prisma.userPreferences.upsert({
         where: { userId: user.id },
         create: { userId: user.id, ...cleanPrefs },
@@ -920,7 +933,7 @@ app.put('/api/user/preferences', async (req, res) => {
   } catch (err) {
     return res.status(500).json({
       message: 'Failed to save preferences',
-      error: err instanceof Error ? error.message : 'Unknown error',
+      error: err instanceof Error ? err.message : 'Unknown error',
     });
   }
 });
@@ -1297,6 +1310,7 @@ app.get('/api/community/profile/:username', async (req, res) => {
           totalSolved: 0,
           totalAttempts: 0,
           accuracy: 100,
+          friendsCount: 0,
           followersCount: 0,
           followingCount: 0,
           isFollowing: currentUser ? memoryFollows.has(`${currentUser.id}:${u.id}`) : false,
@@ -1330,6 +1344,9 @@ app.get('/api/community/profile/:username', async (req, res) => {
     const totalAttempts = u.puzzleAttempts.length;
     const totalSolved = u.puzzleAttempts.filter((a) => a.solved).length;
     const accuracy = totalAttempts > 0 ? Math.round((totalSolved / totalAttempts) * 100) : 100;
+    const followersCount = u._count?.followers || 0;
+    const followingCount = u._count?.following || 0;
+    const friendsCount = Math.min(followersCount, followingCount);
 
     return res.json({
       user: {
@@ -1343,8 +1360,9 @@ app.get('/api/community/profile/:username', async (req, res) => {
         totalSolved,
         totalAttempts,
         accuracy,
-        followersCount: u._count?.followers || 0,
-        followingCount: u._count?.following || 0,
+        friendsCount,
+        followersCount,
+        followingCount,
         isFollowing: Boolean(currentUser && u.followers && u.followers.length > 0),
         isSelf: currentUser?.id === u.id,
         heatmapData: u.heatmapData || {},
@@ -1451,7 +1469,19 @@ app.get('/api/community/leaderboard', async (req, res) => {
     }
 
     if (!usingDatabase) {
-      const memoryList = Array.from(memoryUsers.values()).map((u, idx) => ({
+      let memoryList = Array.from(memoryUsers.values());
+      if (filter === 'friends' && currentUser) {
+        const friendIds = new Set();
+        for (const key of memoryFollows) {
+          const [follower, following] = key.split(':');
+          if (follower === currentUser.id && memoryFollows.has(`${following}:${currentUser.id}`)) {
+            friendIds.add(following);
+          }
+        }
+        friendIds.add(currentUser.id);
+        memoryList = memoryList.filter((u) => friendIds.has(u.id));
+      }
+      const mapped = memoryList.map((u, idx) => ({
         rank: idx + 1,
         id: u.id,
         username: u.username,
@@ -1462,28 +1492,39 @@ app.get('/api/community/leaderboard', async (req, res) => {
         isSelf: currentUser?.id === u.id,
       }));
       return res.json({
-        leaderboard: memoryList,
-        currentUserRank: memoryList.find((m) => m.isSelf) || null,
+        leaderboard: mapped,
+        currentUserRank: mapped.find((m) => m.isSelf) || null,
         period,
         filter,
       });
     }
 
-    // Get following list if friends filter is requested
+    // Get mutual friends list if friends filter is requested (User A follows User B AND User B follows User A)
     let targetUserIds = undefined;
     if (filter === 'friends' && currentUser) {
-      const followingRecords = await prisma.follow.findMany({
+      const userFollowing = await prisma.follow.findMany({
         where: { followerId: currentUser.id },
         select: { followingId: true },
       });
-      targetUserIds = [currentUser.id, ...followingRecords.map((f) => f.followingId)];
+      const followingIds = userFollowing.map((f) => f.followingId);
+
+      const mutualFollowers = await prisma.follow.findMany({
+        where: {
+          followerId: { in: followingIds },
+          followingId: currentUser.id,
+        },
+        select: { followerId: true },
+      });
+
+      const friendIds = mutualFollowers.map((f) => f.followerId);
+      targetUserIds = [currentUser.id, ...friendIds];
     }
 
     if (period === 'streak') {
       const users = await prisma.user.findMany({
         where: targetUserIds ? { id: { in: targetUserIds } } : undefined,
         orderBy: { currentStreak: 'desc' },
-        take: 50,
+        take: 1000,
         select: {
           id: true,
           username: true,
@@ -1537,7 +1578,7 @@ app.get('/api/community/leaderboard', async (req, res) => {
         avatar: true,
         currentStreak: true,
       },
-      take: 100,
+      take: 1000,
     });
 
     const userScores = allUsers.map((u) => ({
@@ -1553,7 +1594,7 @@ app.get('/api/community/leaderboard', async (req, res) => {
 
     userScores.sort((a, b) => b.score - a.score || b.currentStreak - a.currentStreak);
 
-    const leaderboard = userScores.slice(0, 50).map((item, idx) => ({
+    const leaderboard = userScores.map((item, idx) => ({
       ...item,
       rank: idx + 1,
     }));

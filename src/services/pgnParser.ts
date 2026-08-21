@@ -30,33 +30,28 @@ export function detectThemes(gameMoves: string[], startFen: string): PuzzleTheme
     // Check for Check / Checkmate
     if (moveSan.includes('#')) {
       themes.add('Mate');
-      // Smothered mate check: Knight delivers mate while King is surrounded by own pieces
       if (moveSan.startsWith('N')) {
         themes.add('Smothered Mate');
       }
     }
 
-    // Attempt to make move in chess.js
     try {
       const moveObj = chess.move(moveSan);
       if (moveObj) {
-        // Sacrifice detection: capturing piece of lower value or giving up piece
         if (moveObj.captured && ['q', 'r', 'b', 'n'].includes(moveObj.captured)) {
           if (['p', 'b', 'n'].includes(moveObj.piece) && ['q', 'r'].includes(moveObj.captured)) {
             pieceSacrificed = true;
           }
         }
 
-        // Fork or Double attack: check if piece attacks > 1 opponent piece or king+piece
         if (chess.inCheck()) {
-          // If knight or pawn checks king
           if (moveObj.piece === 'n' || moveObj.piece === 'p') {
             themes.add('Fork');
           }
         }
       }
     } catch {
-      // Ignore move parsing errors if non-standard
+      // Ignore move errors
     }
   }
 
@@ -64,13 +59,11 @@ export function detectThemes(gameMoves: string[], startFen: string): PuzzleTheme
     themes.add('Sacrifice');
   }
 
-  // Count total pieces to determine Endgame
   const pieceCount = (startFen.match(/[rnbqRNBQ]/g) || []).length;
   if (pieceCount <= 6) {
     themes.add('Endgame');
   }
 
-  // Default theme if none detected
   if (themes.size === 0) {
     themes.add('Double Attack');
   }
@@ -79,13 +72,36 @@ export function detectThemes(gameMoves: string[], startFen: string): PuzzleTheme
 }
 
 /**
- * Parses raw PGN string into array of Puzzles with rich move annotations & commentary
+ * Robust Multi-Game & Chapter PGN Splitter
+ */
+function splitPgnGames(pgnText: string): string[] {
+  const normalized = pgnText.trim();
+  if (!normalized) return [];
+
+  // Match game boundary starting with standard bracketed tag pairs
+  const tagStartRegex = /(?:^|\n\s*\n)(?=\[\s*(?:Event|Site|Date|Round|White|Black|Result|FEN|SetUp|Chapter|ChapterName|Title|Section|Annotator|Variant)\s+"[^"]*"\])/gi;
+  const parts = normalized.split(tagStartRegex).map(p => p.trim()).filter(p => p.length > 0);
+
+  if (parts.length > 1) {
+    return parts;
+  }
+
+  // Fallback: split on any double newline preceding a bracket tag
+  const bracketSplit = normalized.split(/\n\s*\n(?=\[)/g).map(p => p.trim()).filter(p => p.length > 0);
+  if (bracketSplit.length > 1) {
+    return bracketSplit;
+  }
+
+  // Single game/chapter fallback
+  return [normalized];
+}
+
+/**
+ * Parses raw PGN string into array of Puzzles / Chapters with rich move annotations & commentary
  */
 export function parsePGNToPuzzles(pgnText: string, collectionId: string = 'custom'): Puzzle[] {
   const puzzles: Puzzle[] = [];
-  
-  // Split multiple PGN games by double newlines before [Event header or game delimiter
-  const rawGames = pgnText.split(/\n\s*\n(?=\[Event|\[FEN|1\.)/g).filter(g => g.trim().length > 0);
+  const rawGames = splitPgnGames(pgnText);
 
   rawGames.forEach((rawGame, index) => {
     try {
@@ -97,7 +113,7 @@ export function parsePGNToPuzzles(pgnText: string, collectionId: string = 'custo
         headers[match[1]] = match[2];
       }
 
-      // Determine FEN
+      // Determine starting FEN
       let fen = headers['FEN'] || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
       
       // Extract move text (strip out headers)
@@ -111,11 +127,11 @@ export function parsePGNToPuzzles(pgnText: string, collectionId: string = 'custo
         allComments.push(commentMatch[1].trim());
       }
 
-      // Tokenize movesText while preserving comments with moves
+      // Tokenize moves while preserving comments
       const movesData: { san: string; moveNumber?: number; isWhite?: boolean; comment?: string }[] = [];
       const solutionMoves: string[] = [];
 
-      // Regex matching move number, SAN move, comment, or result
+      // Regex matching move numbers, SAN moves, comments, or results
       const tokenRegex = /(\d+)\s*(\.{1,3})|([a-zA-Z0-9+#=O\-]+)|\{([^}]+)\}/g;
       let tokenMatch;
       let currentMoveNum: number | undefined;
@@ -127,10 +143,8 @@ export function parsePGNToPuzzles(pgnText: string, collectionId: string = 'custo
           currentMoveNum = parseInt(num, 10);
           currentIsWhite = dots !== '...';
         } else if (san) {
-          // Ignore result tokens like 1-0, 0-1, 1/2-1/2, *
           if (['1-0', '0-1', '1/2-1/2', '*'].includes(san)) continue;
-          // Ignore NAGs
-          if (san.startsWith('$')) continue;
+          if (san.startsWith('$')) continue; // Ignore NAGs
 
           solutionMoves.push(san);
           movesData.push({
@@ -139,7 +153,6 @@ export function parsePGNToPuzzles(pgnText: string, collectionId: string = 'custo
             isWhite: currentIsWhite,
             comment: '',
           });
-          // Alternate turn for next move if in the same move number pair
           currentIsWhite = !currentIsWhite;
         } else if (comment) {
           if (movesData.length > 0) {
@@ -151,10 +164,9 @@ export function parsePGNToPuzzles(pgnText: string, collectionId: string = 'custo
 
       if (solutionMoves.length === 0) return;
 
-      // Extract side to move
       const sideToMove: 'w' | 'b' = fen.includes(' b ') ? 'b' : 'w';
 
-      // Convert solution to UCI if possible using chess.js
+      // Convert solution to UCI
       const tempChess = new Chess(fen);
       const solutionUCI: string[] = [];
       solutionMoves.forEach((san) => {
@@ -164,11 +176,10 @@ export function parsePGNToPuzzles(pgnText: string, collectionId: string = 'custo
             solutionUCI.push(moveRes.from + moveRes.to + (moveRes.promotion || ''));
           }
         } catch {
-          // move failure fallback
+          // move fallback
         }
       });
 
-      // Detect themes and difficulty
       const tags = detectThemes(solutionMoves, fen);
       const moveCount = solutionMoves.length;
       let difficulty: DifficultyLevel = 'Medium';
@@ -185,6 +196,13 @@ export function parsePGNToPuzzles(pgnText: string, collectionId: string = 'custo
         rating = 2100;
       }
 
+      // Prioritize clean chapter name/title rather than move comments
+      const rawEvent = headers['Event'] && headers['Event'] !== '?' && !headers['Event'].toLowerCase().includes('untitled') ? headers['Event'] : '';
+      const rawChapter = headers['Chapter'] || headers['ChapterName'] || headers['Title'] || headers['Section'] || headers['Study'] || '';
+      const rawPlayers = (headers['White'] && headers['Black'] && headers['White'] !== '?') ? `${headers['White']} vs ${headers['Black']}` : (headers['White'] && headers['White'] !== '?' ? headers['White'] : '');
+
+      const chapterName = rawChapter || rawEvent || rawPlayers || `Chapter ${index + 1}`;
+
       const puzzleId = `puzzle_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 5)}`;
 
       puzzles.push({
@@ -194,14 +212,14 @@ export function parsePGNToPuzzles(pgnText: string, collectionId: string = 'custo
         sideToMove,
         solutionMoves,
         solutionUCI,
-        description: allComments[0] || headers['Event'] || `Tactical Puzzle #${index + 1}`,
-        event: headers['Event'],
+        description: chapterName,
+        event: rawEvent || chapterName,
         white: headers['White'],
         black: headers['Black'],
         tags,
         difficulty,
         rating,
-        comments: allComments.join('\n'),
+        comments: allComments.join('\n') || headers['Annotator'] || undefined,
         rawPgn: rawGame.trim(),
         movesData,
         hasFailed: false,

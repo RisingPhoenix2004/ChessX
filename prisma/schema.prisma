@@ -78,6 +78,7 @@ model Collection {
   description String?
   icon        String   @default("📂")
   color       String   @default("from-emerald-500 to-teal-700")
+  coverImage  String?
   isCompleted Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

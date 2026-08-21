@@ -63,10 +63,16 @@ export async function registerAccount(payload: {
   password: string;
   confirmPassword?: string;
 }): Promise<AuthResponse> {
-  return requestJson<AuthResponse>('/api/auth/register', {
+  const response = await requestJson<AuthResponse>('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+
+  if (response.token) {
+    saveAuthToken(response.token);
+  }
+
+  return response;
 }
 
 export async function loginAccount(payload: {

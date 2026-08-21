@@ -4,6 +4,7 @@ import { Chessboard } from 'react-chessboard';
 import { Collection, Puzzle } from '../../types/chess';
 import { Settings as UserSettings } from '../../services/storage';
 import { soundEngine } from '../../services/soundEngine';
+import { LichessNotationView } from './LichessNotationView';
 import {
   X,
   ChevronLeft,
@@ -13,11 +14,10 @@ import {
   Play,
   Pause,
   RotateCcw,
+  RotateCw,
+  Volume2,
+  VolumeX,
   BookOpen,
-  Layers,
-  Clock,
-  User,
-  Award
 } from 'lucide-react';
 
 interface PGNViewerModalProps {
@@ -47,285 +47,261 @@ export const PGNViewerModal: React.FC<PGNViewerModalProps> = ({
   onClose,
   onStartTraining,
 }) => {
-  const collectionPuzzles = puzzles.filter((p) => (collection.puzzleIds || []).includes(p.id));
+  const collectionPuzzles = (puzzles || []).filter(
+    (p) => (collection.puzzleIds || []).includes(p.id) || p.collectionId === collection.id
+  );
+  const activePuzzles = collectionPuzzles.length > 0 ? collectionPuzzles : puzzles.slice(0, 5);
+
   const [selectedPuzzleIdx, setSelectedPuzzleIdx] = useState<number>(0);
-  const currentPuzzle = collectionPuzzles[selectedPuzzleIdx] || puzzles[0];
-
-  const [currentFen, setCurrentFen] = useState<string>(currentPuzzle?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
-  const [fenHistory, setFenHistory] = useState<string[]>([]);
-  const [moveHistory, setMoveHistory] = useState<{ san: string; moveNumber?: number; isWhite?: boolean; comment?: string }[]>([]);
-  const [currentMoveIdx, setCurrentMoveIdx] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [soundMuted, setSoundMuted] = useState<boolean>(!settings?.soundEnabled);
 
-  const playTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const currentPuzzle = activePuzzles[selectedPuzzleIdx] || activePuzzles[0];
+
+  const [currentMoveIdx, setCurrentMoveIdx] = useState<number>(0);
+  const [fenHistory, setFenHistory] = useState<string[]>([]);
+  const [moveHistory, setMoveHistory] = useState<
+    { san: string; moveNumber: number; isWhite: boolean }[]
+  >([]);
+
+  const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const boardThemeKey = settings?.boardTheme || 'dark';
   const activeColors = BOARD_THEME_COLORS[boardThemeKey] || BOARD_THEME_COLORS.dark;
 
-  // Build FEN and Move history when puzzle changes
+  // Initialize active puzzle history
   useEffect(() => {
     if (!currentPuzzle) return;
 
-    const startFen = currentPuzzle.fen;
-    const hist = [startFen];
-    const movesList: { san: string; moveNumber?: number; isWhite?: boolean; comment?: string }[] = [];
+    const startFen = currentPuzzle.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const simGame = new Chess(startFen);
+    const history = [startFen];
+    const moves: { san: string; moveNumber: number; isWhite: boolean }[] = [];
 
-    const simChess = new Chess(startFen);
-    const sourceMoves = currentPuzzle.solutionMoves || [];
-
-    sourceMoves.forEach((san, idx) => {
+    const solutionMoves = currentPuzzle.solutionMoves || [];
+    solutionMoves.forEach((san, idx) => {
       try {
-        const moveRes = simChess.move(san);
+        const moveRes = simGame.move(san);
         if (moveRes) {
-          hist.push(simChess.fen());
-          movesList.push({
+          history.push(simGame.fen());
+          moves.push({
             san,
             moveNumber: Math.floor(idx / 2) + 1,
             isWhite: idx % 2 === 0,
-            comment: currentPuzzle.movesData?.[idx]?.comment || (idx === sourceMoves.length - 1 ? currentPuzzle.comments : undefined),
           });
         }
       } catch {
-        // ignore move errors
+        // move parse fallback
       }
     });
 
-    setFenHistory(hist);
-    setMoveHistory(movesList);
+    setFenHistory(history);
+    setMoveHistory(moves);
     setCurrentMoveIdx(0);
-    setCurrentFen(startFen);
     setIsPlaying(false);
     setOrientation(currentPuzzle.sideToMove === 'b' ? 'black' : 'white');
-  }, [currentPuzzle]);
+  }, [currentPuzzle, selectedPuzzleIdx]);
 
-  // Autoplay handler
+  // Autoplay effect
   useEffect(() => {
     if (isPlaying) {
-      playTimerRef.current = setInterval(() => {
+      autoPlayTimerRef.current = setInterval(() => {
         setCurrentMoveIdx((prev) => {
           if (prev < fenHistory.length - 1) {
-            const next = prev + 1;
-            setCurrentFen(fenHistory[next]);
-            soundEngine.playMove();
-            return next;
+            if (!soundMuted) soundEngine.playMove();
+            return prev + 1;
           } else {
             setIsPlaying(false);
             return prev;
           }
         });
-      }, 1000);
+      }, 900);
     } else {
-      if (playTimerRef.current) clearInterval(playTimerRef.current);
+      if (autoPlayTimerRef.current) clearInterval(autoPlayTimerRef.current);
     }
 
     return () => {
-      if (playTimerRef.current) clearInterval(playTimerRef.current);
+      if (autoPlayTimerRef.current) clearInterval(autoPlayTimerRef.current);
     };
-  }, [isPlaying, fenHistory]);
+  }, [isPlaying, fenHistory, soundMuted]);
 
-  const jumpToMove = (idx: number) => {
-    if (idx < 0 || idx >= fenHistory.length) return;
-    setCurrentMoveIdx(idx);
-    setCurrentFen(fenHistory[idx]);
-    soundEngine.playMove();
+  const currentFen = fenHistory[currentMoveIdx] || currentPuzzle?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+  const jumpToMove = (targetIdx: number) => {
+    if (targetIdx < 0 || targetIdx >= fenHistory.length) return;
+    setCurrentMoveIdx(targetIdx);
+    if (!soundMuted) soundEngine.playMove();
   };
 
-  const handleStart = () => jumpToMove(0);
-  const handlePrev = () => jumpToMove(currentMoveIdx - 1);
-  const handleNext = () => jumpToMove(currentMoveIdx + 1);
-  const handleEnd = () => jumpToMove(fenHistory.length - 1);
-  const handleFlip = () => setOrientation(orientation === 'white' ? 'black' : 'white');
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="bg-[#0f0f0f] border border-neutral-800 rounded-3xl max-w-5xl w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col font-sans">
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 sm:p-6 border-b border-neutral-800">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-[#111520] border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
+        {/* Header Bar */}
+        <div className="p-4 bg-neutral-50 dark:bg-[#171b26] border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-[#171717] border border-neutral-800 text-white">
+            <div className="p-2 rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">
               <BookOpen className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-extrabold text-white">{collection.name}</h2>
-                <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-[#171717] text-neutral-400 border border-neutral-800">
-                  {collection.category}
-                </span>
-              </div>
-              <p className="text-xs text-neutral-400">
-                Position {selectedPuzzleIdx + 1} of {collectionPuzzles.length || 1}
+              <h2 className="text-base font-black text-neutral-950 dark:text-white truncate max-w-md">
+                {collection.name}
+              </h2>
+              <p className="text-xs text-neutral-500 font-semibold">
+                {activePuzzles.length} Chapters • Interactive PGN Viewer
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {onStartTraining && (
               <button
-                onClick={() => {
-                  onClose();
-                  onStartTraining(collection.id);
-                }}
-                className="px-4 py-2 rounded-xl bg-white text-black font-extrabold text-xs shadow-md hover:bg-neutral-200 cursor-pointer hidden sm:block"
+                onClick={() => onStartTraining(collection.id)}
+                className="px-4 py-2 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-bold shadow-xs hover:opacity-90 transition-opacity cursor-pointer"
               >
-                Train This Study
+                Solve Chapter
               </button>
             )}
+
             <button
               onClick={onClose}
-              className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+              className="p-2 rounded-xl bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Content Body Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-5 sm:p-6 overflow-y-auto flex-1 items-start">
-          {/* Left Column: Board & Navigation Controls */}
-          <div className="lg:col-span-7 flex flex-col items-center space-y-4">
-            <div className="w-full max-w-[440px] aspect-square rounded-2xl overflow-hidden border border-neutral-800 shadow-xl bg-[#121212]">
-              <Chessboard
-                position={currentFen}
-                arePiecesDraggable={false}
-                boardOrientation={orientation}
-                showBoardNotation={settings?.showCoordinates !== false}
-                customDarkSquareStyle={{ backgroundColor: activeColors.dark }}
-                customLightSquareStyle={{ backgroundColor: activeColors.light }}
-                customBoardStyle={{ borderRadius: '1rem' }}
-              />
-            </div>
+        {/* 3-Column Content Layout */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 overflow-y-auto flex-1 items-start">
+          {/* Chapter Selector Sidebar */}
+          <div className="md:col-span-3 bg-neutral-50 dark:bg-[#161a24] p-3 rounded-2xl border border-neutral-200 dark:border-neutral-800/80 space-y-2 max-h-[480px] flex flex-col">
+            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider px-1">
+              Select Chapter
+            </h3>
 
-            {/* Navigation Controls Bar */}
-            <div className="flex items-center justify-between w-full max-w-[440px] bg-[#171717] p-2 rounded-2xl border border-neutral-800">
-              <button
-                onClick={handleStart}
-                disabled={currentMoveIdx <= 0}
-                className="p-2.5 rounded-xl text-neutral-400 hover:text-white disabled:opacity-30 cursor-pointer"
-                title="First move"
-              >
-                <ChevronsLeft className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={handlePrev}
-                disabled={currentMoveIdx <= 0}
-                className="p-2.5 rounded-xl text-neutral-400 hover:text-white disabled:opacity-30 cursor-pointer"
-                title="Previous move"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={() => setIsPlaying(!isPlaying)}
-                className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-white hover:text-black text-white font-extrabold text-xs transition-colors cursor-pointer flex items-center gap-1.5"
-              >
-                {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                <span>{isPlaying ? 'Pause' : 'Play'}</span>
-              </button>
-
-              <button
-                onClick={handleNext}
-                disabled={currentMoveIdx >= fenHistory.length - 1}
-                className="p-2.5 rounded-xl text-neutral-400 hover:text-white disabled:opacity-30 cursor-pointer"
-                title="Next move"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={handleEnd}
-                disabled={currentMoveIdx >= fenHistory.length - 1}
-                className="p-2.5 rounded-xl text-neutral-400 hover:text-white disabled:opacity-30 cursor-pointer"
-                title="Last move"
-              >
-                <ChevronsRight className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={handleFlip}
-                className="p-2.5 rounded-xl text-neutral-400 hover:text-white cursor-pointer"
-                title="Flip board"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
+            <div className="flex-1 overflow-y-auto space-y-1 pr-1 scrollbar-thin">
+              {activePuzzles.map((p, idx) => (
+                <button
+                  key={p.id || idx}
+                  onClick={() => setSelectedPuzzleIdx(idx)}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer truncate ${
+                    selectedPuzzleIdx === idx
+                      ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+                      : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  {p.description || `Chapter ${idx + 1}`}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Right Column: Positions List & Moves Tree with Commentary */}
-          <div className="lg:col-span-5 space-y-4 flex flex-col justify-between h-full">
-            {/* Position Selector Tabs if multiple puzzles */}
-            {collectionPuzzles.length > 1 && (
-              <div className="space-y-1.5">
-                <span className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider block">
-                  Select Position
-                </span>
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                  {collectionPuzzles.map((_, pIdx) => (
-                    <button
-                      key={pIdx}
-                      onClick={() => setSelectedPuzzleIdx(pIdx)}
-                      className={`px-3 py-1 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
-                        selectedPuzzleIdx === pIdx
-                          ? 'bg-white text-black'
-                          : 'bg-[#171717] text-neutral-400 hover:text-white border border-neutral-800'
-                      }`}
-                    >
-                      #{pIdx + 1}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Game / Position Details Card */}
-            <div className="bg-[#171717] p-4 rounded-2xl border border-neutral-800 space-y-2">
-              <h4 className="text-sm font-extrabold text-white">
-                {currentPuzzle?.description || currentPuzzle?.event || 'Tactical Study Position'}
-              </h4>
-              {(currentPuzzle?.white || currentPuzzle?.black) && (
-                <div className="text-xs text-neutral-400 flex items-center gap-2">
-                  <User className="w-3.5 h-3.5" />
-                  <span>{currentPuzzle.white || 'White'} vs {currentPuzzle.black || 'Black'}</span>
-                </div>
-              )}
+          {/* Chessboard Column */}
+          <div className="md:col-span-5 flex flex-col items-center gap-3">
+            <div className="w-full max-w-[380px] aspect-square rounded-none overflow-hidden border border-neutral-300 dark:border-neutral-700 shadow-md relative bg-neutral-900">
+              <Chessboard
+                position={currentFen}
+                boardOrientation={orientation}
+                showPromotionDialog={false}
+                customDarkSquareStyle={{ backgroundColor: activeColors.dark }}
+                customLightSquareStyle={{ backgroundColor: activeColors.light }}
+              />
             </div>
 
-            {/* Moves List with Comments */}
-            <div className="bg-[#171717] p-4 rounded-2xl border border-neutral-800 space-y-3 flex-1 max-h-[300px] overflow-y-auto">
-              <span className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider block">
-                Move Sequence
-              </span>
+            {/* Exact Action Bar under Board (Image 1 requested order: Flip, Sound, Color Circle. NO TEXT!) */}
+            <div className="flex items-center justify-between w-full max-w-[380px] px-3 py-2 bg-white dark:bg-[#111520] rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-xs">
+              <div className="flex items-center gap-3">
+                {/* 1. Flip Board Icon Button */}
+                <button
+                  onClick={() => setOrientation(orientation === 'white' ? 'black' : 'white')}
+                  className="p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-800 dark:text-white transition-colors cursor-pointer"
+                  title={`Flip Board (Current: ${orientation})`}
+                >
+                  <RotateCw className="w-4 h-4" />
+                </button>
 
-              <div className="space-y-2">
-                {moveHistory.map((m, idx) => {
-                  const isActive = currentMoveIdx === idx + 1;
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => jumpToMove(idx + 1)}
-                      className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
-                        isActive
-                          ? 'bg-white/10 border-white/40 text-white shadow-md'
-                          : 'bg-[#121212] border-neutral-800 text-neutral-300 hover:border-neutral-700'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 font-mono font-bold text-xs">
-                        <span className="text-neutral-500">
-                          {m.moveNumber ? `${m.moveNumber}.` : `#${idx + 1}`}
-                        </span>
-                        <span className="text-white">{m.san}</span>
-                      </div>
-
-                      {m.comment && (
-                        <p className="text-[11px] text-neutral-300 mt-1 pl-1 border-l-2 border-amber-400 font-sans">
-                          {m.comment}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
+                {/* 2. Sound Toggle Icon Button */}
+                <button
+                  onClick={() => setSoundMuted(!soundMuted)}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    soundMuted
+                      ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
+                      : 'bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-800 dark:text-white'
+                  }`}
+                  title={soundMuted ? 'Unmute Sound' : 'Mute Sound'}
+                >
+                  {soundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                </button>
               </div>
+
+              {/* 3. Color to Move Circle Icon */}
+              <div className="flex items-center">
+                <span
+                  className={`w-4 h-4 rounded-full border shrink-0 transition-all ${
+                    currentFen.includes(' w ')
+                      ? 'bg-white border-neutral-400 shadow-xs'
+                      : 'bg-black border-neutral-600 shadow-xs'
+                  }`}
+                  title={currentFen.includes(' w ') ? 'White to move' : 'Black to move'}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Moves & Analysis Column (Lichess Notation Tree View) */}
+          <div className="md:col-span-4 flex flex-col justify-between space-y-3 h-[480px]">
+            <div className="flex-1 overflow-hidden">
+              <LichessNotationView
+                currentFen={currentFen}
+                currentMoveIdx={currentMoveIdx}
+                moveHistory={moveHistory}
+                comments={currentPuzzle?.comments}
+                onSelectMove={jumpToMove}
+              />
+            </div>
+
+            {/* Navigation Stepper Bar */}
+            <div className="flex items-center justify-center gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-800">
+              <button
+                onClick={() => jumpToMove(0)}
+                disabled={currentMoveIdx <= 0}
+                className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 text-neutral-800 dark:text-neutral-200 disabled:opacity-30 cursor-pointer"
+                title="First Move"
+              >
+                <ChevronsLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => jumpToMove(currentMoveIdx - 1)}
+                disabled={currentMoveIdx <= 0}
+                className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 text-neutral-800 dark:text-neutral-200 disabled:opacity-30 cursor-pointer"
+                title="Previous Move"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setIsPlaying(!isPlaying)}
+                className="px-4 py-2 rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                <span>{isPlaying ? 'Pause' : 'Play'}</span>
+              </button>
+              <button
+                onClick={() => jumpToMove(currentMoveIdx + 1)}
+                disabled={currentMoveIdx >= fenHistory.length - 1}
+                className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 text-neutral-800 dark:text-neutral-200 disabled:opacity-30 cursor-pointer"
+                title="Next Move"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => jumpToMove(fenHistory.length - 1)}
+                disabled={currentMoveIdx >= fenHistory.length - 1}
+                className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 text-neutral-800 dark:text-neutral-200 disabled:opacity-30 cursor-pointer"
+                title="Last Move"
+              >
+                <ChevronsRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>

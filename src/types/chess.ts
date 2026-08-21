@@ -30,6 +30,9 @@ export interface UserProfile {
   email: string;
   avatar: string;
   bio?: string;
+  friendsCount?: number;
+  followersCount?: number;
+  followingCount?: number;
   isLoggedIn: boolean;
 }
 
@@ -124,6 +127,7 @@ export interface UserStats {
   coins: number;
   performanceRating: number;
   streakFreezeAvailable: number;
+  friendsCount?: number;
   heatmapData: Record<string, { solved: number; failed: number }>;
 }
 
@@ -166,6 +170,7 @@ export interface CommunityUser {
   bestStreak: number;
   totalSolved: number;
   accuracy: number;
+  friendsCount?: number;
   followersCount: number;
   followingCount: number;
   isFollowing: boolean;

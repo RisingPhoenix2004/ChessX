@@ -3,37 +3,40 @@
 @tailwind utilities;
 
 :root {
-  --bg-app: #f8fafc;
+  --bg-app: #f9fafb;
   --bg-surface: #ffffff;
-  --bg-surface-elevated: #f1f5f9;
+  --bg-surface-elevated: #f3f4f6;
   --bg-card: #ffffff;
-  --bg-card-hover: #f8fafc;
+  --bg-card-hover: #f9fafb;
   --border-subtle: #f1f5f9;
-  --border-default: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --text-primary: #0f172a;
-  --text-secondary: #334155;
-  --text-muted: #64748b;
+  --border-default: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text-primary: #111827;
+  --text-secondary: #374151;
+  --text-muted: #6b7280;
   --accent-brand: #10b981;
   --accent-brand-hover: #059669;
   --accent-success: #10b981;
   --accent-error: #ef4444;
   --accent-warning: #f59e0b;
   --accent-fire: #f59e0b;
-  --chessboard-bg: #e2e8f0;
-  --shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+  --chessboard-bg: #e5e7eb;
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
+  --shadow-elevated: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --nav-height: 3.5rem;
 }
 
-html.dark, :root.dark {
-  --bg-app: #080b11;
-  --bg-surface: #0f1523;
-  --bg-surface-elevated: #161e31;
-  --bg-card: #0f1523;
-  --bg-card-hover: #161e31;
-  --border-subtle: #162032;
-  --border-default: #1f2c44;
-  --border-strong: #2d3f60;
-  --text-primary: #f8fafc;
+html.dark,
+:root.dark {
+  --bg-app: #0b0e14;
+  --bg-surface: #111520;
+  --bg-surface-elevated: #171c2a;
+  --bg-card: #111520;
+  --bg-card-hover: #171c2a;
+  --border-subtle: #1a2033;
+  --border-default: #1e293b;
+  --border-strong: #334155;
+  --text-primary: #f1f5f9;
   --text-secondary: #cbd5e1;
   --text-muted: #94a3b8;
   --accent-brand: #10b981;
@@ -42,8 +45,9 @@ html.dark, :root.dark {
   --accent-error: #ef4444;
   --accent-warning: #f59e0b;
   --accent-fire: #f59e0b;
-  --chessboard-bg: #121824;
-  --shadow-card: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 4px 12px -2px rgba(0, 0, 0, 0.3);
+  --chessboard-bg: #111520;
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px -1px rgba(0, 0, 0, 0.2);
+  --shadow-elevated: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
 }
 
 @layer base {
@@ -51,14 +55,94 @@ html.dark, :root.dark {
     background-color: var(--bg-app);
     color: var(--text-primary);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: background-color 0.25s ease, color 0.25s ease;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Smooth theme transitions for all themed elements */
+  *,
+  *::before,
+  *::after {
+    transition-property: background-color, border-color, color, box-shadow;
+    transition-duration: 0.15s;
+    transition-timing-function: ease;
+  }
+
+  /* Except animations and transforms which need their own timing */
+  .transition-all,
+  .transition-transform,
+  [class*="animate-"] {
+    transition-property: all;
+  }
+}
+
+@layer utilities {
+  /* Tactix fade-in animation */
+  .tactix-fade-in {
+    animation: tactixFadeIn 0.2s ease-out;
+  }
+
+  .tactix-slide-up {
+    animation: tactixSlideUp 0.25s ease-out;
+  }
+
+  .tactix-slide-down {
+    animation: tactixSlideDown 0.2s ease-out;
+  }
+
+  .tactix-scale-in {
+    animation: tactixScaleIn 0.15s ease-out;
+  }
+}
+
+/* Keyframes */
+@keyframes tactixFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tactixSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tactixSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tactixScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
 /* Custom Scrollbars */
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -74,11 +158,31 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
 
-html.light ::-webkit-scrollbar-thumb, :root:not(.dark) ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+html.light ::-webkit-scrollbar-thumb,
+:root:not(.dark) ::-webkit-scrollbar-thumb {
+  background: #d1d5db;
   border-radius: 9999px;
 }
 
-html.light ::-webkit-scrollbar-thumb:hover, :root:not(.dark) ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+html.light ::-webkit-scrollbar-thumb:hover,
+:root:not(.dark) ::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Focus styles */
+*:focus-visible {
+  outline: 2px solid var(--accent-brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Remove focus outlines for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Select dropdown option styling for dark mode */
+html.dark select option {
+  background-color: #111520;
+  color: #f1f5f9;
 }

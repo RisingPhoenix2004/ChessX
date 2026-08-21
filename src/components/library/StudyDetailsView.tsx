@@ -2,30 +2,25 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Chess, Square } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import { Collection, Puzzle } from '../../types/chess';
-import { Settings as UserSettings } from '../../services/storage';
+import { Settings as UserSettings, storage } from '../../services/storage';
 import { soundEngine } from '../../services/soundEngine';
+import { LichessNotationView } from './LichessNotationView';
+import { LichessPromotionOverlay } from './LichessPromotionOverlay';
 import {
   ArrowLeft,
   Search,
-  Plus,
-  Play,
   Zap,
-  RotateCcw,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Cpu,
-  Settings as SettingsIcon,
-  BookOpen,
-  Eye,
-  CheckCircle2,
-  X,
-  Share2,
-  Copy,
-  Layers,
-  Sparkles,
-  Volume2
+  Play,
+  Pause,
+  RotateCw,
+  Volume2,
+  VolumeX,
+  Scaling,
+  SkipForward,
 } from 'lucide-react';
 
 interface StudyDetailsViewProps {
@@ -37,8 +32,8 @@ interface StudyDetailsViewProps {
 }
 
 const BOARD_THEME_COLORS: Record<string, { dark: string; light: string }> = {
-  dark: { dark: '#2b3548', light: '#4b5b78' },
-  emerald: { dark: '#4e7837', light: '#dee3c8' },
+  dark: { dark: '#262626', light: '#404040' },
+  emerald: { dark: '#769656', light: '#eeeee8' },
   wood: { dark: '#b58863', light: '#f0d9b5' },
   cyberpunk: { dark: '#2b1b54', light: '#4f228d' },
   glass: { dark: '#1e293b', light: '#475569' },
@@ -48,73 +43,6 @@ const BOARD_THEME_COLORS: Record<string, { dark: string; light: string }> = {
   tournament: { dark: '#52697a', light: '#cfd8dc' },
 };
 
-// Stockfish Simulated Evaluation Engine Line Generator
-function generateEngineAnalysis(chess: Chess, sideToMove: 'w' | 'b') {
-  const isMate = chess.isCheckmate();
-  if (isMate) {
-    return {
-      evalScore: '#0',
-      isWinning: sideToMove === 'b', // side that just moved delivered mate
-      lines: ['Checkmate — position terminated.'],
-    };
-  }
-
-  const moves = chess.moves({ verbose: true });
-  if (moves.length === 0) {
-    return { evalScore: '0.0', isWinning: true, lines: ['Stalemate / Draw'] };
-  }
-
-  // Count piece values
-  const board = chess.board();
-  let whiteMaterial = 0;
-  let blackMaterial = 0;
-  const values: Record<string, number> = { p: 1, n: 3, b: 3.2, r: 5, q: 9, k: 0 };
-
-  for (const row of board) {
-    for (const piece of row) {
-      if (piece) {
-        if (piece.color === 'w') whiteMaterial += values[piece.type] || 0;
-        else blackMaterial += values[piece.type] || 0;
-      }
-    }
-  }
-
-  const diff = (whiteMaterial - blackMaterial).toFixed(1);
-  const scoreNum = parseFloat(diff);
-  const evalScore = scoreNum > 0 ? `+${diff}` : `${diff}`;
-
-  // Top candidate lines
-  const topLines = [];
-  const primarySan = moves[0]?.san || 'e4';
-  const secondSan = moves[1]?.san || (moves[0] ? `${moves[0].san}` : 'Nf3');
-  const thirdSan = moves[2]?.san || 'd4';
-
-  topLines.push({
-    score: scoreNum > 2 ? `+${(scoreNum + 1.2).toFixed(1)}` : evalScore,
-    line: `1. ${primarySan} ...`,
-  });
-
-  if (moves.length > 1) {
-    topLines.push({
-      score: scoreNum > 0 ? `+${Math.max(0, scoreNum - 0.5).toFixed(1)}` : `${(scoreNum - 0.5).toFixed(1)}`,
-      line: `1. ${secondSan} ...`,
-    });
-  }
-
-  if (moves.length > 2) {
-    topLines.push({
-      score: scoreNum > 0 ? `+${Math.max(0, scoreNum - 1.1).toFixed(1)}` : `${(scoreNum - 1.1).toFixed(1)}`,
-      line: `1. ${thirdSan} ...`,
-    });
-  }
-
-  return {
-    evalScore,
-    isWinning: scoreNum >= 0,
-    lines: topLines,
-  };
-}
-
 export const StudyDetailsView: React.FC<StudyDetailsViewProps> = ({
   study,
   puzzles,
@@ -122,142 +50,241 @@ export const StudyDetailsView: React.FC<StudyDetailsViewProps> = ({
   onBack,
   onStartTraining,
 }) => {
-  const puzzleIds = study.puzzleIds || [];
-  const studyPuzzles = useMemo(
-    () => (puzzles || []).filter((p) => puzzleIds.includes(p.id)),
-    [puzzles, puzzleIds]
-  );
+  // Collect all puzzles/chapters belonging to this study
+  const studyPuzzles = useMemo(() => {
+    const list = (puzzles || []).filter(
+      (p) => (study.puzzleIds || []).includes(p.id) || p.collectionId === study.id
+    );
+    if (list.length > 0) return list;
+    return (puzzles || []).slice(0, 5); // Fallback if standalone
+  }, [puzzles, study]);
 
   const [activeChapterIdx, setActiveChapterIdx] = useState<number>(0);
   const [chapterSearch, setChapterSearch] = useState<string>('');
-  const [engineEnabled, setEngineEnabled] = useState<boolean>(true);
   const [boardOrientation, setBoardOrientation] = useState<'white' | 'black'>('white');
-  const [copyFeedback, setCopyFeedback] = useState<string>('');
+  const [soundMuted, setSoundMuted] = useState<boolean>(!settings?.soundEnabled);
+  const [autoNext, setAutoNext] = useState<boolean>(settings?.autoNext || false);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [pendingPromotion, setPendingPromotion] = useState<{ from: Square; to: Square } | null>(null);
 
   const currentPuzzle = studyPuzzles[activeChapterIdx] || studyPuzzles[0] || puzzles[0];
 
-  // Chess Navigation State
-  const [game, setGame] = useState<Chess>(() => new Chess(currentPuzzle?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'));
+  // Helper to extract clean chapter title (ignoring comments)
+  const getChapterTitle = (p: Puzzle, idx: number) => {
+    if (p.event && p.event !== '?' && !p.event.toLowerCase().includes('untitled')) {
+      return p.event;
+    }
+    if (p.white && p.black && p.white !== '?') {
+      return `${p.white} vs ${p.black}`;
+    }
+    if (p.description && !p.description.includes('\n') && p.description.length < 50) {
+      return p.description;
+    }
+    return `Chapter ${idx + 1}`;
+  };
+
+  // Chess Game State
+  const [game, setGame] = useState<Chess>(
+    () => new Chess(currentPuzzle?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')
+  );
   const [fenHistory, setFenHistory] = useState<string[]>([]);
-  const [moveList, setMoveList] = useState<{ san: string; moveNum: number; isWhite: boolean }[]>([]);
+  const [moveList, setMoveList] = useState<{ san: string; moveNum: number; isWhite: boolean; comment?: string }[]>([]);
   const [currentMoveStep, setCurrentMoveStep] = useState<number>(0);
+  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
 
-  const boardThemeKey = settings?.boardTheme || 'emerald';
-  const activeColors = BOARD_THEME_COLORS[boardThemeKey] || BOARD_THEME_COLORS.emerald;
+  const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize chapter FEN & solution variation
+  const boardThemeKey = settings?.boardTheme || 'dark';
+  const activeColors = BOARD_THEME_COLORS[boardThemeKey] || BOARD_THEME_COLORS.dark;
+
+  // Initialize chapter FEN & solution variation when switching chapters
   useEffect(() => {
     if (!currentPuzzle) return;
 
-    const startFen = currentPuzzle.fen;
-    const sim = new Chess(startFen);
+    const startFen = currentPuzzle.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const simGame = new Chess(startFen);
     const history = [startFen];
-    const moves: { san: string; moveNum: number; isWhite: boolean }[] = [];
+    const moves: { san: string; moveNum: number; isWhite: boolean; comment?: string }[] = [];
 
-    const side = currentPuzzle.sideToMove === 'b' ? 'black' : 'white';
-    setBoardOrientation(side);
-
-    (currentPuzzle.solutionMoves || []).forEach((san, idx) => {
+    const solutionMoves = currentPuzzle.solutionMoves || [];
+    solutionMoves.forEach((san, idx) => {
       try {
-        const res = sim.move(san);
-        if (res) {
-          history.push(sim.fen());
+        const moveRes = simGame.move(san);
+        if (moveRes) {
+          history.push(simGame.fen());
           moves.push({
             san,
             moveNum: Math.floor(idx / 2) + 1,
             isWhite: idx % 2 === 0,
+            comment: currentPuzzle.movesData?.[idx]?.comment,
           });
         }
       } catch {
-        // ignore move parse errors
+        // move parse fallback
       }
     });
 
-    setGame(new Chess(startFen));
     setFenHistory(history);
     setMoveList(moves);
     setCurrentMoveStep(0);
-  }, [currentPuzzle]);
+    setGame(new Chess(startFen));
+    setSelectedSquare(null);
+    setIsPlaying(false);
+    setPendingPromotion(null);
+    setBoardOrientation(currentPuzzle.sideToMove === 'b' ? 'black' : 'white');
+  }, [currentPuzzle, activeChapterIdx]);
 
-  const jumpToMove = (step: number) => {
-    if (step < 0 || step >= fenHistory.length) return;
-    setCurrentMoveStep(step);
-    setGame(new Chess(fenHistory[step]));
-    soundEngine.playMove();
-  };
-
-  const handleNextChapter = () => {
-    if (activeChapterIdx + 1 < studyPuzzles.length) {
-      setActiveChapterIdx(activeChapterIdx + 1);
-    }
-  };
-
-  const handlePrevChapter = () => {
-    if (activeChapterIdx > 0) {
-      setActiveChapterIdx(activeChapterIdx - 1);
-    }
-  };
-
-  // Keyboard navigation
+  // Autoplay handler
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') jumpToMove(currentMoveStep - 1);
-      else if (e.key === 'ArrowRight') jumpToMove(currentMoveStep + 1);
-      else if (e.key === 'Home') jumpToMove(0);
-      else if (e.key === 'End') jumpToMove(fenHistory.length - 1);
-      else if (e.key === 'ArrowUp') handlePrevChapter();
-      else if (e.key === 'ArrowDown') handleNextChapter();
+    if (isPlaying) {
+      autoPlayTimerRef.current = setInterval(() => {
+        setCurrentMoveStep((prev) => {
+          if (prev < fenHistory.length - 1) {
+            const next = prev + 1;
+            setGame(new Chess(fenHistory[next]));
+            if (!soundMuted) soundEngine.playMove();
+            return next;
+          } else {
+            setIsPlaying(false);
+            return prev;
+          }
+        });
+      }, 900);
+    } else {
+      if (autoPlayTimerRef.current) clearInterval(autoPlayTimerRef.current);
+    }
+
+    return () => {
+      if (autoPlayTimerRef.current) clearInterval(autoPlayTimerRef.current);
     };
+  }, [isPlaying, fenHistory, soundMuted]);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentMoveStep, fenHistory.length, activeChapterIdx, studyPuzzles.length]);
+  const jumpToMove = (targetStep: number) => {
+    if (targetStep < 0 || targetStep >= fenHistory.length) return;
+    setCurrentMoveStep(targetStep);
+    setGame(new Chess(fenHistory[targetStep]));
+    if (!soundMuted) soundEngine.playMove();
+  };
 
-  const handleCopyFen = () => {
-    navigator.clipboard.writeText(game.fen());
-    setCopyFeedback('FEN Copied!');
-    setTimeout(() => setCopyFeedback(''), 2000);
+  // Execute promotion move when piece is selected
+  const handleExecutePromotion = (promotionPiece: 'q' | 'r' | 'b' | 'n') => {
+    if (!pendingPromotion) return;
+    const { from, to } = pendingPromotion;
+    setPendingPromotion(null);
+    executeMove(from, to, promotionPiece);
+  };
+
+  const executeMove = (sourceSquare: Square, targetSquare: Square, promotionPiece: 'q' | 'r' | 'b' | 'n' = 'q'): boolean => {
+    try {
+      const tempChess = new Chess(game.fen());
+      const move = tempChess.move({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: promotionPiece,
+      });
+
+      if (!move) return false;
+
+      if (!soundMuted) {
+        if (move.captured) soundEngine.playCapture();
+        else soundEngine.playMove();
+      }
+
+      const newFen = tempChess.fen();
+      setGame(tempChess);
+      setSelectedSquare(null);
+
+      // Update Move list and Fen History
+      const nextStep = currentMoveStep + 1;
+      const updatedHistory = [...fenHistory.slice(0, currentMoveStep + 1), newFen];
+      const updatedMoveList = [
+        ...moveList.slice(0, currentMoveStep),
+        {
+          san: move.san,
+          moveNum: Math.floor(currentMoveStep / 2) + 1,
+          isWhite: currentMoveStep % 2 === 0,
+        },
+      ];
+
+      setFenHistory(updatedHistory);
+      setMoveList(updatedMoveList);
+      setCurrentMoveStep(nextStep);
+
+      // Persist moves into puzzle object so user's moves are saved in PGN
+      if (currentPuzzle) {
+        currentPuzzle.solutionMoves = updatedMoveList.map((m) => m.san);
+        currentPuzzle.movesData = updatedMoveList.map((m) => ({
+          san: m.san,
+          moveNumber: m.moveNum,
+          isWhite: m.isWhite,
+          comment: m.comment,
+        }));
+        storage.savePuzzles(puzzles);
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Interactive move support in PGN viewer
+  const onPieceDrop = (sourceSquare: Square, targetSquare: Square): boolean => {
+    const tempChess = new Chess(game.fen());
+    const piece = tempChess.get(sourceSquare);
+
+    // Check for promotion requirement
+    if (
+      piece &&
+      piece.type === 'p' &&
+      ((piece.color === 'w' && targetSquare[1] === '8') ||
+        (piece.color === 'b' && targetSquare[1] === '1'))
+    ) {
+      setPendingPromotion({ from: sourceSquare, to: targetSquare });
+      return false;
+    }
+
+    return executeMove(sourceSquare, targetSquare);
+  };
+
+  const handleSquareClick = (square: Square) => {
+    if (selectedSquare) {
+      if (selectedSquare === square) {
+        setSelectedSquare(null);
+        return;
+      }
+      const moved = onPieceDrop(selectedSquare, square);
+      if (moved) return;
+    }
+
+    const piece = game.get(square);
+    if (piece && piece.color === game.turn()) {
+      setSelectedSquare(square);
+    } else {
+      setSelectedSquare(null);
+    }
   };
 
   // Filter chapters by search
   const filteredChapters = useMemo(() => {
     if (!chapterSearch.trim()) return studyPuzzles;
     const q = chapterSearch.toLowerCase();
-    return studyPuzzles.filter(
-      (p, i) =>
-        (p.description || `Chapter ${i + 1}`).toLowerCase().includes(q) ||
-        (p.tags || []).some((t) => t.toLowerCase().includes(q))
-    );
+    return studyPuzzles.filter((p, i) => {
+      const title = getChapterTitle(p, i).toLowerCase();
+      return title.includes(q) || (p.tags || []).some((t) => t.toLowerCase().includes(q));
+    });
   }, [studyPuzzles, chapterSearch]);
 
-  // Engine evaluation data
-  const engineAnalysis = useMemo(() => {
-    return generateEngineAnalysis(game, currentPuzzle?.sideToMove || 'w');
-  }, [game, currentPuzzle]);
-
-  // Format move pairs for PGN table
-  const movePairs = useMemo(() => {
-    const pairs = [];
-    for (let i = 0; i < moveList.length; i += 2) {
-      pairs.push({
-        moveNum: Math.floor(i / 2) + 1,
-        white: moveList[i]?.san,
-        whiteStep: i + 1,
-        black: moveList[i + 1]?.san || null,
-        blackStep: i + 2,
-      });
-    }
-    return pairs;
-  }, [moveList]);
+  const currentChapterTitle = currentPuzzle ? getChapterTitle(currentPuzzle, activeChapterIdx) : `Chapter ${activeChapterIdx + 1}`;
 
   return (
     <div className="max-w-7xl mx-auto px-2 sm:px-4 py-4 space-y-4 font-sans">
       {/* Top Header Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white dark:bg-[#0c1017] p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white dark:bg-[#111520] p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="p-2 rounded-xl bg-slate-100 dark:bg-[#131a28] hover:bg-slate-200 dark:hover:bg-[#1c2742] text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+            className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
             title="Back to Studies"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -265,15 +292,15 @@ export const StudyDetailsView: React.FC<StudyDetailsViewProps> = ({
 
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white truncate max-w-md">
+              <h1 className="text-base sm:text-lg font-black text-neutral-950 dark:text-white truncate max-w-md">
                 {study.name}
               </h1>
-              <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700">
                 {study.category}
               </span>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Chapter {activeChapterIdx + 1} of {studyPuzzles.length}: {currentPuzzle?.description || 'Tactical variation'}
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 font-semibold">
+              Chapter {activeChapterIdx + 1} of {studyPuzzles.length}: {currentChapterTitle}
             </p>
           </div>
         </div>
@@ -282,295 +309,217 @@ export const StudyDetailsView: React.FC<StudyDetailsViewProps> = ({
         <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
           <button
             onClick={() => onStartTraining(study.id)}
-            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer"
+            className="px-5 py-2.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-100 text-white dark:text-neutral-900 font-bold text-xs shadow-xs transition-all flex items-center gap-2 cursor-pointer"
           >
-            <Zap className="w-4 h-4 fill-white" />
+            <Zap className="w-4 h-4 fill-current" />
             <span>SOLVE STUDY</span>
           </button>
         </div>
       </div>
 
-      {/* 3-Column Lichess-Inspired Study Layout */}
+      {/* 3-Column Layout: Reduced Left Column to lg:col-span-3, Expanded Board Column to lg:col-span-5 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* Left Column: Chapters / Variations Navigation (3 Cols) */}
-        <div className="lg:col-span-3 bg-white dark:bg-[#0c1017] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-md flex flex-col h-[620px] overflow-hidden">
+        {/* Left Column: Chapters Navigation (Reduced Width to lg:col-span-3 per Image 1 annotation) */}
+        <div className="lg:col-span-3 bg-white dark:bg-[#111520] rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col h-[580px] overflow-hidden">
           {/* Chapters Header */}
-          <div className="p-3.5 border-b border-slate-100 dark:border-slate-800/80 space-y-2">
-            <div className="flex items-center justify-between text-xs font-black text-slate-900 dark:text-white">
-              <span className="text-amber-500 font-bold">{studyPuzzles.length} Chapters</span>
-              <span className="text-[11px] text-slate-400 font-medium">Interactive Study</span>
+          <div className="p-3 border-b border-neutral-100 dark:border-neutral-800 space-y-2">
+            <div className="flex items-center justify-between text-xs font-bold text-neutral-900 dark:text-white">
+              <span>{studyPuzzles.length} Chapters</span>
+              <span className="text-[10px] text-neutral-400 font-medium">Study</span>
             </div>
 
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
               <input
                 type="text"
                 value={chapterSearch}
                 onChange={(e) => setChapterSearch(e.target.value)}
-                placeholder="Search chapters..."
-                className="w-full bg-slate-50 dark:bg-[#131b2b] border border-slate-200 dark:border-slate-700/60 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
+                placeholder="Search..."
+                className="w-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/60 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none"
               />
             </div>
           </div>
 
           {/* Chapter List Items */}
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/50 p-1.5 space-y-1 scrollbar-thin">
-            {filteredChapters.map((p, idx) => {
+          <div className="flex-1 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800/40 p-1 space-y-0.5 scrollbar-thin">
+            {filteredChapters.map((p) => {
               const originalIdx = studyPuzzles.indexOf(p);
               const isActive = originalIdx === activeChapterIdx;
-              const chapterTitle = p.description || `Chapter ${originalIdx + 1}`;
+              const title = getChapterTitle(p, originalIdx);
 
               return (
                 <button
                   key={p.id}
                   onClick={() => setActiveChapterIdx(originalIdx)}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                  className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between gap-2 cursor-pointer ${
                     isActive
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#151d2f]'
+                      ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 shadow-xs'
+                      : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
                   }`}
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`font-mono text-[11px] ${isActive ? 'text-blue-200' : 'text-slate-400'}`}>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span
+                      className={`font-mono text-[10px] ${
+                        isActive ? 'text-neutral-400 dark:text-neutral-600' : 'text-neutral-400'
+                      }`}
+                    >
                       {originalIdx + 1}
                     </span>
-                    <span className="truncate">{chapterTitle}</span>
+                    <span className="truncate text-xs">{title}</span>
                   </div>
 
-                  {isActive && <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0" />}
+                  {isActive && <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />}
                 </button>
               );
             })}
           </div>
-
-          {/* Chapter Footer */}
-          <div className="p-3 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50 dark:bg-[#0f1420]">
-            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono text-center">
-              Use ↑ / ↓ arrow keys to switch chapters
-            </div>
-          </div>
         </div>
 
-        {/* Center Column: Interactive Chessboard + Eval Bar (5.5 Cols) */}
+        {/* Center Column: Expanded Chessboard & Exact Icon-Only Action Bar (lg:col-span-5) */}
         <div className="lg:col-span-5 flex flex-col items-center space-y-3">
-          <div className="flex items-center gap-2 w-full max-w-[500px]">
-            {/* Visual Evaluation Bar (Lichess style) */}
-            {engineEnabled && (
-              <div className="w-3.5 h-[480px] bg-slate-800 rounded-full overflow-hidden flex flex-col justify-end border border-slate-700 shrink-0">
-                <div
-                  className="bg-white w-full transition-all duration-300"
-                  style={{
-                    height: engineAnalysis.isWinning ? '65%' : '35%',
-                  }}
-                />
-              </div>
-            )}
+          {/* Sharp Square Chessboard Container */}
+          <div className="w-full aspect-square rounded-none overflow-hidden border border-neutral-300 dark:border-neutral-700 shadow-md relative bg-neutral-900">
+            <Chessboard
+              position={game.fen()}
+              onPieceDrop={onPieceDrop}
+              onSquareClick={handleSquareClick}
+              boardOrientation={boardOrientation}
+              showBoardNotation={settings?.showCoordinates !== false}
+              showPromotionDialog={false}
+              animationDuration={150}
+              customDarkSquareStyle={{ backgroundColor: activeColors.dark }}
+              customLightSquareStyle={{ backgroundColor: activeColors.light }}
+            />
 
-            {/* Board Container */}
-            <div className="w-full aspect-square rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl relative bg-slate-900">
-              <Chessboard
-                position={game.fen()}
-                boardOrientation={boardOrientation}
-                showBoardNotation={settings?.showCoordinates !== false}
-                animationDuration={150}
-                customBoardStyle={{
-                  borderRadius: '1rem',
-                }}
-                customDarkSquareStyle={{ backgroundColor: activeColors.dark }}
-                customLightSquareStyle={{ backgroundColor: activeColors.light }}
-                arePiecesDraggable={false}
+            {/* Resize Handle Icon at Bottom Right Corner */}
+            <div
+              className="absolute bottom-1 right-1 p-1 bg-black/70 hover:bg-black text-neutral-300 hover:text-white rounded-none cursor-se-resize z-10 transition-colors"
+              title="Resize Chessboard"
+            >
+              <Scaling className="w-3.5 h-3.5" />
+            </div>
+
+            {/* Authentic Lichess Vertical Column Promotion Overlay (Image 5 style) */}
+            {pendingPromotion && (
+              <LichessPromotionOverlay
+                targetSquare={pendingPromotion.to}
+                orientation={boardOrientation}
+                color={game.turn()}
+                onSelectPiece={handleExecutePromotion}
+                onCancel={() => setPendingPromotion(null)}
+              />
+            )}
+          </div>
+
+          {/* Exact Action Bar under Board (Image 1 requested order: Flip, Sound, AutoNext, Color Circle. NO TEXT!) */}
+          <div className="flex items-center justify-between w-full px-3 py-2 bg-white dark:bg-[#111520] rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-xs">
+            <div className="flex items-center gap-3">
+              {/* 1. Flip Board Icon Button */}
+              <button
+                onClick={() => setBoardOrientation(boardOrientation === 'white' ? 'black' : 'white')}
+                className="p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-800 dark:text-white transition-colors cursor-pointer"
+                title={`Flip Board (Current: ${boardOrientation})`}
+              >
+                <RotateCw className="w-4 h-4" />
+              </button>
+
+              {/* 2. Sound Toggle Icon Button */}
+              <button
+                onClick={() => setSoundMuted(!soundMuted)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  soundMuted
+                    ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
+                    : 'bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-800 dark:text-white'
+                }`}
+                title={soundMuted ? 'Unmute Sound' : 'Mute Sound'}
+              >
+                {soundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+
+              {/* 3. AutoNext Toggle Icon Button (Image 1 requirement) */}
+              <button
+                onClick={() => setAutoNext(!autoNext)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  autoNext
+                    ? 'bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/40'
+                    : 'bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-400'
+                }`}
+                title={autoNext ? 'AutoNext ON (Advances on solve)' : 'AutoNext OFF'}
+              >
+                <SkipForward className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 4. Color to Move Circle Icon (Image 1 requirement) */}
+            <div className="flex items-center">
+              <span
+                className={`w-4 h-4 rounded-full border shrink-0 transition-all ${
+                  game.turn() === 'w'
+                    ? 'bg-white border-neutral-400 shadow-xs'
+                    : 'bg-black border-neutral-600 shadow-xs'
+                }`}
+                title={game.turn() === 'w' ? 'White to move' : 'Black to move'}
               />
             </div>
           </div>
-
-          {/* Board Footer Tools: Flip, Copy FEN, Status */}
-          <div className="flex items-center justify-between gap-2 w-full max-w-[500px] px-2 text-xs text-slate-500 dark:text-slate-400">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setBoardOrientation(boardOrientation === 'white' ? 'black' : 'white')}
-                className="hover:text-slate-900 dark:hover:text-white cursor-pointer font-bold"
-              >
-                Flip Board ({boardOrientation})
-              </button>
-
-              <button
-                onClick={handleCopyFen}
-                className="hover:text-slate-900 dark:hover:text-white cursor-pointer flex items-center gap-1 font-bold"
-              >
-                <Copy className="w-3 h-3" />
-                <span>{copyFeedback || 'Copy FEN'}</span>
-              </button>
-            </div>
-
-            <div className="font-mono text-[11px]">
-              {currentPuzzle?.sideToMove === 'w' ? 'White to Move' : 'Black to Move'}
-            </div>
-          </div>
         </div>
 
-        {/* Right Column: Stockfish Engine Analysis & PGN Move Table (3.5 Cols) */}
-        <div className="lg:col-span-4 bg-white dark:bg-[#0c1017] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-md flex flex-col h-[620px] justify-between overflow-hidden">
-          <div className="p-4 space-y-4 overflow-y-auto flex-1 scrollbar-thin">
-            {/* Stockfish Engine Header Bar (Image 2 style) */}
-            <div className="p-3 bg-slate-50 dark:bg-[#131b2b] rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div
-                    onClick={() => setEngineEnabled(!engineEnabled)}
-                    className={`px-2 py-0.5 rounded-lg text-[10px] font-black cursor-pointer transition-colors ${
-                      engineEnabled
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
-                    }`}
-                  >
-                    {engineEnabled ? 'ENGINE ON' : 'OFF'}
-                  </div>
-
-                  <span className="font-mono font-black text-xs text-slate-900 dark:text-white">
-                    {engineAnalysis.evalScore}
-                  </span>
-
-                  <span className="text-[10px] font-mono text-slate-400">SF 18 dev NNUE</span>
-                </div>
-
-                <span className="text-[9px] font-bold text-blue-500 uppercase bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-900/40">
-                  Depth 31
-                </span>
-              </div>
-
-              {/* Engine Candidate Lines */}
-              {engineEnabled && (
-                <div className="space-y-1 pt-1 border-t border-slate-200 dark:border-slate-700/40 font-mono text-[11px]">
-                  {engineAnalysis.lines.map((ln, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-slate-600 dark:text-slate-300">
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400 w-10">
-                        {typeof ln === 'object' ? ln.score : '+0.5'}
-                      </span>
-                      <span className="flex-1 truncate pl-1">
-                        {typeof ln === 'object' ? ln.line : ln}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Coach / Instructor Commentary Box */}
-            <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl border border-emerald-200/80 dark:border-emerald-900/40 text-xs space-y-1">
-              <span className="font-black text-emerald-800 dark:text-emerald-300 text-[10px] uppercase tracking-wider block">
-                Study Analysis
-              </span>
-              <p className="text-slate-700 dark:text-slate-200 leading-relaxed italic">
-                "{currentPuzzle?.comments || currentPuzzle?.description || 'Find the optimal forcing moves and tactical patterns in this variation.'}"
-              </p>
-            </div>
-
-            {/* Interactive PGN Move Table (2 Columns) */}
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                Move Sequence (Click to jump)
-              </div>
-
-              <div className="bg-slate-50 dark:bg-[#131b2b] rounded-xl border border-slate-200 dark:border-slate-700/60 p-2.5 font-mono text-xs max-h-52 overflow-y-auto scrollbar-thin">
-                <div className="grid grid-cols-12 gap-y-1 items-center">
-                  {movePairs.map((pair) => {
-                    const isWhiteActive = currentMoveStep === pair.whiteStep;
-                    const isBlackActive = currentMoveStep === pair.blackStep;
-
-                    return (
-                      <React.Fragment key={pair.moveNum}>
-                        <div className="col-span-2 text-slate-400 font-bold select-none py-0.5">
-                          {pair.moveNum}.
-                        </div>
-
-                        <div className="col-span-5 pr-1">
-                          <button
-                            onClick={() => jumpToMove(pair.whiteStep)}
-                            className={`w-full text-left px-2 py-0.5 rounded font-bold transition-all cursor-pointer ${
-                              isWhiteActive
-                                ? 'bg-blue-600 text-white shadow-sm'
-                                : 'text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
-                            }`}
-                          >
-                            {pair.white}
-                          </button>
-                        </div>
-
-                        <div className="col-span-5 pl-1">
-                          {pair.black ? (
-                            <button
-                              onClick={() => jumpToMove(pair.blackStep)}
-                              className={`w-full text-left px-2 py-0.5 rounded font-bold transition-all cursor-pointer ${
-                                isBlackActive
-                                  ? 'bg-blue-600 text-white shadow-sm'
-                                  : 'text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
-                              }`}
-                            >
-                              {pair.black}
-                            </button>
-                          ) : null}
-                        </div>
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+        {/* Right Column: Lichess PGN Inline Move Sequence & Annotations (lg:col-span-4) */}
+        <div className="lg:col-span-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col justify-between h-[580px] space-y-3 p-1">
+          <div className="flex-1 overflow-hidden">
+            <LichessNotationView
+              currentFen={game.fen()}
+              currentMoveIdx={currentMoveStep}
+              moveHistory={moveList}
+              comments={currentPuzzle?.comments}
+              onSelectMove={jumpToMove}
+            />
           </div>
 
-          {/* Navigation Controls & Next Chapter Footer */}
-          <div className="p-3 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50 dark:bg-[#0f1420] space-y-2">
-            {/* Step Controls: |< < > >| */}
-            <div className="flex items-center justify-between gap-1">
-              <button
-                onClick={() => jumpToMove(0)}
-                disabled={currentMoveStep <= 0}
-                className="p-2 rounded-lg bg-white dark:bg-[#131b2b] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 disabled:opacity-30 cursor-pointer"
-                title="Start (Home)"
-              >
-                <ChevronsLeft className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={() => jumpToMove(currentMoveStep - 1)}
-                disabled={currentMoveStep <= 0}
-                className="p-2 rounded-lg bg-white dark:bg-[#131b2b] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 disabled:opacity-30 cursor-pointer"
-                title="Previous (Left Arrow)"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-
-              <span className="text-[11px] font-mono font-bold text-slate-500 dark:text-slate-400">
-                Move {currentMoveStep} / {fenHistory.length - 1}
-              </span>
-
-              <button
-                onClick={() => jumpToMove(currentMoveStep + 1)}
-                disabled={currentMoveStep >= fenHistory.length - 1}
-                className="p-2 rounded-lg bg-white dark:bg-[#131b2b] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 disabled:opacity-30 cursor-pointer"
-                title="Next (Right Arrow)"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={() => jumpToMove(fenHistory.length - 1)}
-                disabled={currentMoveStep >= fenHistory.length - 1}
-                className="p-2 rounded-lg bg-white dark:bg-[#131b2b] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 disabled:opacity-30 cursor-pointer"
-                title="End (End)"
-              >
-                <ChevronsRight className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Next Chapter Button (Image 2 style) */}
+          {/* Bottom Step & Playback Navigation Controls */}
+          <div className="flex items-center justify-between gap-1.5 p-2 bg-white dark:bg-[#111520] rounded-xl border border-neutral-200 dark:border-neutral-800">
             <button
-              onClick={handleNextChapter}
-              disabled={activeChapterIdx >= studyPuzzles.length - 1}
-              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-40 cursor-pointer"
+              onClick={() => jumpToMove(0)}
+              disabled={currentMoveStep <= 0}
+              className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 disabled:opacity-30 cursor-pointer"
+              title="First move (Home)"
             >
-              <span>Next Chapter</span>
+              <ChevronsLeft className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => jumpToMove(currentMoveStep - 1)}
+              disabled={currentMoveStep <= 0}
+              className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 disabled:opacity-30 cursor-pointer"
+              title="Previous move (Left arrow)"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              className="px-4 py-2 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+              <span>{isPlaying ? 'Pause' : 'Play'}</span>
+            </button>
+
+            <button
+              onClick={() => jumpToMove(currentMoveStep + 1)}
+              disabled={currentMoveStep >= fenHistory.length - 1}
+              className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 disabled:opacity-30 cursor-pointer"
+              title="Next move (Right arrow)"
+            >
               <ChevronRight className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => jumpToMove(fenHistory.length - 1)}
+              disabled={currentMoveStep >= fenHistory.length - 1}
+              className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 disabled:opacity-30 cursor-pointer"
+              title="Last move (End)"
+            >
+              <ChevronsRight className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -578,3 +527,4 @@ export const StudyDetailsView: React.FC<StudyDetailsViewProps> = ({
     </div>
   );
 };
+
