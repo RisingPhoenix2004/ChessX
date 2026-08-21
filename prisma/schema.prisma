@@ -1,0 +1,208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                          String           @id @default(uuid())
+  googleId                    String?          @unique
+  username                    String           @unique
+  usernameNormalized          String           @default("")
+  email                       String           @unique
+  name                        String
+  avatar                      String?
+  bio                         String?
+  passwordHash                String
+  resetPasswordToken          String?          @unique
+  resetPasswordTokenExpiresAt DateTime?
+  dailyGoal                   Int              @default(10)
+  level                       Int              @default(1)
+  completedCollectionsCount   Int              @default(0)
+  xp                          Int              @default(0)
+  coins                       Int              @default(50)
+  performanceRating           Int              @default(2006)
+  currentStreak               Int              @default(1)
+  bestStreak                  Int              @default(1)
+  lastActiveDate              DateTime         @default(now())
+  heatmapData                 Json?
+  createdAt                   DateTime         @default(now())
+  updatedAt                   DateTime         @updatedAt
+
+  collections                 Collection[]
+  puzzleAttempts              PuzzleAttempt[]
+  srsStates                   SRSState[]
+  achievements                UserAchievement[]
+  videos                      VideoLibraryItem[]
+  preferences                 UserPreferences?
+  following                   Follow[]         @relation("UserFollowing")
+  followers                   Follow[]         @relation("UserFollowers")
+
+  @@index([usernameNormalized])
+  @@map("users")
+}
+
+model UserPreferences {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  theme              String   @default("dark")
+  boardTheme         String   @default("dark")
+  pieceSet           String   @default("standard")
+  showCoordinates    Boolean  @default(true)
+  coordinateStyle    String   @default("inside")
+  highlightLastMove  Boolean  @default(true)
+  showLegalMoves     Boolean  @default(true)
+  soundEnabled       Boolean  @default(true)
+  moveSound          Boolean  @default(true)
+  captureSound       Boolean  @default(true)
+  checkSound         Boolean  @default(true)
+  errorSound         Boolean  @default(true)
+  autoNext           Boolean  @default(false)
+  autoNextDelaySec   Int      @default(2)
+  streakFreezeActive Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+model Collection {
+  id          String   @id
+  userId      String
+  name        String
+  category    String
+  description String?
+  icon        String   @default("📂")
+  color       String   @default("from-emerald-500 to-teal-700")
+  isCompleted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  puzzles     Puzzle[]
+
+  @@map("collections")
+}
+
+model Puzzle {
+  id              String   @id
+  collectionId    String
+  userCategory    String?
+  fen             String
+  sideToMove      String
+  solutionMoves   String[]
+  solutionUCI     String[]
+  description     String?
+  event           String?
+  white           String?
+  black           String?
+  tags            String[]
+  difficulty      String   @default("Medium")
+  rating          Int      @default(1400)
+  comments        String?
+  rawPgn          String?
+  movesData       Json?
+  hasFailed       Boolean  @default(false)
+  attempts        Int      @default(0)
+  solvedCount     Int      @default(0)
+  failedCount     Int      @default(0)
+  avgSolveTimeMs  Int      @default(0)
+  personalBestMs  Int?
+  lastAttemptDate DateTime?
+  srsDueDate      DateTime?
+  srsRepetitions  Int      @default(0)
+  srsEaseFactor   Float    @default(2.5)
+  srsIntervalDays Int      @default(0)
+  isFavorite      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  collection      Collection      @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  attemptsLog     PuzzleAttempt[]
+  srsState        SRSState?
+
+  @@map("puzzles")
+}
+
+model PuzzleAttempt {
+  id           String   @id @default(uuid())
+  userId       String
+  puzzleId     String
+  collectionId String?
+  solved       Boolean
+  solveTimeMs  Int
+  mistakes     Int
+  xpEarned     Int
+  coinsEarned  Int
+  attemptedAt  DateTime @default(now())
+
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  puzzle       Puzzle @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+
+  @@map("puzzle_attempts")
+}
+
+model SRSState {
+  id           String   @id @default(uuid())
+  userId       String
+  puzzleId     String   @unique
+  repetitions  Int      @default(0)
+  easeFactor   Float    @default(2.5)
+  intervalDays Int      @default(0)
+  dueDate      DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  puzzle       Puzzle @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+
+  @@map("srs_states")
+}
+
+model UserAchievement {
+  id            String    @id @default(uuid())
+  userId        String
+  achievementId String
+  unlocked      Boolean   @default(false)
+  currentValue  Int       @default(0)
+  unlockedAt    DateTime?
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+model VideoLibraryItem {
+  id             String   @id @default(uuid())
+  userId         String
+  youtubeUrl     String
+  youtubeVideoId String
+  title          String
+  category       String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("video_library_items")
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower    User     @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+  @@map("follows")
+}
